@@ -1,7 +1,8 @@
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
-import { setCurrentUser, type UserRole } from '../data/mockData';
+import { useAppContext } from '../hooks/useAppContext';
+import type { UserRole } from '../data/mockData';
 import { Shield, Users, User } from 'lucide-react';
 
 interface RoleSwitcherProps {
@@ -9,6 +10,8 @@ interface RoleSwitcherProps {
 }
 
 export function RoleSwitcher({ onRoleChange }: RoleSwitcherProps) {
+  const { setCurrentUser } = useAppContext();
+
   const roles: Array<{ role: UserRole; label: string; description: string; icon: typeof Shield }> = [
     {
       role: 'circuit-admin',
@@ -30,22 +33,19 @@ export function RoleSwitcher({ onRoleChange }: RoleSwitcherProps) {
     },
   ];
 
-  const handleRoleSwitch = (role: UserRole) => {
-    const names = {
-      'circuit-admin': 'Admin User',
-      'congregation-admin': 'Congregation Overseer',
-      'member': 'Sarah Thompson',
+  const handleRoleSwitch = async (role: UserRole) => {
+    const userIds = {
+      'circuit-admin': 'adm',
+      'congregation-admin': 'cong-adm',
+      'member': 'mem-1',
     };
 
-    setCurrentUser({
-      id: `user-${role}`,
-      name: names[role],
-      role,
-      congregationId: role !== 'circuit-admin' ? 'cong-1' : undefined,
-      telegramHandle: role === 'member' ? '@sthompson' : '@admin',
-    });
-
-    onRoleChange();
+    try {
+      await setCurrentUser(userIds[role], role);
+      onRoleChange();
+    } catch (error) {
+      console.error('Failed to switch role:', error);
+    }
   };
 
   return (

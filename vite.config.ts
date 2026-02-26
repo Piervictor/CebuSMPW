@@ -16,6 +16,20 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    host: 'localhost',
+    port: 5173,
+    open: true,
+    strictPort: false,
+    fs: {
+      strict: false,
+    },
+  },
+  preview: {
+    host: 'localhost',
+    port: 4173,
+    open: true,
+  },
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],

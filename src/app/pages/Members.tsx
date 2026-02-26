@@ -7,6 +7,22 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
+import {
   Table,
   TableBody,
   TableCell,
@@ -14,16 +30,25 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui/table';
-import { members, congregations, shifts, getCongregationName, getLocationName, type Member } from '../data/mockData';
-import { Search, Users, AlertCircle, Calendar, MapPin } from 'lucide-react';
+import { MemberForm } from '../components/forms/MemberForm';
+import { useAppContext } from '../hooks/useAppContext';
+import type { Member } from '../data/mockData';
+import { getCongregationName, getLocationName } from '../data/mockData';
+import { Search, Users, AlertCircle, Calendar, MapPin, Plus, Edit, Trash2, Info } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function Members() {
+  const { members, congregations, shifts, deleteMember, error, isLoading } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCongregation, setSelectedCongregation] = useState<string>('all');
   const [selectedAgeGroup, setSelectedAgeGroup] = useState<string>('all');
   const [selectedExperience, setSelectedExperience] = useState<string>('all');
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [formDialogOpen, setFormDialogOpen] = useState(false);
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [memberToDelete, setMemberToDelete] = useState<Member | null>(null);
 
   const filteredMembers = members.filter((member) => {
     const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -59,6 +84,37 @@ export default function Members() {
       .slice(0, 10);
   };
 
+  const handleAddMember = () => {
+    setEditingMember(null);
+    setFormDialogOpen(true);
+  };
+
+  const handleEditMember = (member: Member) => {
+    setEditingMember(member);
+    setFormDialogOpen(true);
+    setSheetOpen(false);
+  };
+
+  const handleDeleteClick = (member: Member) => {
+    setMemberToDelete(member);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (memberToDelete) {
+      try {
+        await deleteMember(memberToDelete.id);
+        toast.success('Member deleted successfully');
+        setDeleteConfirmOpen(false);
+        setMemberToDelete(null);
+        setSheetOpen(false);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to delete member';
+        toast.error(errorMsg);
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -67,8 +123,8 @@ export default function Members() {
           <h1 className="text-3xl font-semibold text-neutral-900">Members</h1>
           <p className="text-neutral-600 mt-1">Directory of publishers participating in public witnessing</p>
         </div>
-        <Button>
-          <Users className="h-4 w-4 mr-2" />
+        <Button onClick={handleAddMember}>
+          <Plus className="h-4 w-4 mr-2" />
           Add Member
         </Button>
       </div>
@@ -278,13 +334,31 @@ export default function Members() {
                         {nearMonthlyLimit && <AlertCircle className="h-4 w-4 text-amber-500" />}
                       </div>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right space-x-2">
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => openMemberDetails(member)}
+                        title="View details"
                       >
-                        View
+                        <Info className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEditMember(member)}
+                        title="Edit member"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => handleDeleteClick(member)}
+                        title="Delete member"
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -504,9 +578,16 @@ export default function Members() {
                 </Card>
 
                 <div className="flex gap-3">
-                  <Button className="flex-1">Edit Member</Button>
-                  <Button variant="outline" onClick={() => setSheetOpen(false)}>
-                    Close
+                  <Button className="flex-1" onClick={() => handleEditMember(selectedMember)}>
+                    <Edit className="h-4 w-4 mr-2" />
+                    Edit Member
+                  </Button>
+                  <Button 
+                    variant="destructive" 
+                    onClick={() => handleDeleteClick(selectedMember)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
                   </Button>
                 </div>
               </div>
@@ -514,6 +595,48 @@ export default function Members() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Add/Edit Member Dialog */}
+      <Dialog open={formDialogOpen} onOpenChange={setFormDialogOpen}>
+        <DialogContent className="w-full sm:max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingMember ? 'Edit Member' : 'Add New Member'}</DialogTitle>
+            <DialogDescription>
+              {editingMember
+                ? 'Update the member details below'
+                : 'Fill in the details to add a new member'}
+            </DialogDescription>
+          </DialogHeader>
+          <MemberForm
+            member={editingMember || undefined}
+            onSuccess={() => setFormDialogOpen(false)}
+            onCancel={() => setFormDialogOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Member?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{memberToDelete?.name}</strong>?
+              This action cannot be undone. All associated shift assignments will be removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex gap-3">
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-red-600 hover:bg-red-700"
+              disabled={isLoading}
+            >
+              {isLoading ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
