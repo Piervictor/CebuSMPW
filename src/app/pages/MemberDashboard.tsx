@@ -3,12 +3,30 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Progress } from '../components/ui/progress';
-import { currentUser, shifts, getLocationById, getCongregationName, members } from '../data/mockData';
+import { useAppContext } from '../hooks/useAppContext';
 import { Calendar, MapPin, Clock, User, CheckCircle2, TrendingUp } from 'lucide-react';
 
 export default function MemberDashboard() {
+  const { currentUser, members, shifts, getLocationById, congregations } = useAppContext();
+  const getCongregationName = (id: string) => congregations.find((c) => c.id === id)?.name || 'Unknown';
+
+  if (!currentUser) {
+    return null;
+  }
+
   // Get current member data
-  const memberData = members.find((m) => m.name === currentUser.name) || members[0];
+  const memberData = members.find((member) => member.id === currentUser.id) || members[0];
+
+  if (!memberData) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-semibold text-neutral-900">My Schedule</h1>
+          <p className="text-neutral-600 mt-1">No member profile is linked to the current user.</p>
+        </div>
+      </div>
+    );
+  }
 
   // Get member's shifts
   const memberShifts = shifts.filter((s) => s.assignedMembers.includes(memberData.id));

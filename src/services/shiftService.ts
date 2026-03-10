@@ -11,25 +11,13 @@ export const shiftService = {
    * Get all shifts
    * Can optionally filter by location or date range
    */
-  getAllShifts: async (filters?: {
+  getAllShifts: async (_filters?: {
     locationId?: string;
     startDate?: string;
     endDate?: string;
   }): Promise<Shift[]> => {
     try {
-      // In mock mode, return from context
-      // In real API mode, would call: await apiService.shifts.getAll()
-      let query = '';
-      if (filters) {
-        const params = new URLSearchParams();
-        if (filters.locationId) params.append('locationId', filters.locationId);
-        if (filters.startDate) params.append('startDate', filters.startDate);
-        if (filters.endDate) params.append('endDate', filters.endDate);
-        query = params.toString() ? `?${params.toString()}` : '';
-      }
-
-      // Mock: return from context or API call
-      const shifts =  await apiService.shifts.getAll();
+      const shifts = await apiService.shifts.getAll();
       return shifts || [];
     } catch (error) {
       console.error('Error fetching shifts:', error);

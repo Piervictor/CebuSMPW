@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -7,27 +7,116 @@ import { Input } from '../components/ui/input';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import {
-  shifts,
-  locations,
-  members,
-  congregations,
-  getLocationById,
-  getMemberById,
-  getCongregationName,
   type Shift,
   type Member,
+  type WeekdayAvailability,
 } from '../data/mockData';
+import { useAppContext } from '../hooks/useAppContext';
 import { Calendar, MapPin, Users, AlertTriangle, CheckCircle2, Clock, Send, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
+// ─── Availability matching utilities ──────────────────────────
+
+type ShiftPeriod = 'Morning' | 'Afternoon' | 'Evening';
+
+/** Classify a shift's time range into a broad period. */
+function classifyShiftPeriod(startTime: string, endTime: string): ShiftPeriod {
+  const [sh] = startTime.split(':').map(Number);
+  const [eh] = endTime.split(':').map(Number);
+  // Evening: shift starts at 17:00 or later
+  if (sh >= 17) return 'Evening';
+  // Afternoon: shift starts at 12:00 or later (but before evening)
+  if (sh >= 12) return 'Afternoon';
+  // Morning start – if it ends past 14:00—treat as Afternoon (spans into PM)
+  if (eh > 14) return 'Afternoon';
+  return 'Morning';
+}
+
+/**
+ * Map of which WeekdayAvailability values cover each shift period.
+ * 'Full Day' always covers everything.
+ */
+const PERIOD_COVERAGE: Record<ShiftPeriod, WeekdayAvailability[]> = {
+  Morning:   ['Morning', 'Half Day Morning', 'Full Day'],
+  Afternoon: ['Afternoon', 'Half Day Afternoon', 'Full Day'],
+  Evening:   ['Evening', 'Full Day'],
+};
+
+/**
+ * Determine the day-of-week key from a shift's ISO date string.
+ * Returns the lowercase weekday name matching MemberAvailability keys,
+ * or 'saturday'/'sunday' for weekends.
+ */
+function getWeekdayKey(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][d.getDay()];
+}
+
+/**
+ * Check whether a member's recorded availability covers the given shift.
+ * Returns { available, reason, dayAvailability }.
+ */
+function checkAvailabilityMatch(
+  member: Member,
+  shift: Shift,
+): { available: boolean; reason: string; dayAvailability: string } {
+  const dayKey = getWeekdayKey(shift.date);
+
+  // ── Weekend logic: member only stores how many Sat/Sun per month ──
+  if (dayKey === 'saturday') {
+    const days = member.availability.saturdayDays;
+    if (days <= 0) return { available: false, reason: 'Not available on Saturdays', dayAvailability: `Sat: ${days}/mo` };
+    return { available: true, reason: '', dayAvailability: `Sat: ${days}/mo` };
+  }
+  if (dayKey === 'sunday') {
+    const days = member.availability.sundayDays;
+    if (days <= 0) return { available: false, reason: 'Not available on Sundays', dayAvailability: `Sun: ${days}/mo` };
+    return { available: true, reason: '', dayAvailability: `Sun: ${days}/mo` };
+  }
+
+  // ── Weekday logic ──
+  const memberAvail = member.availability[dayKey as keyof typeof member.availability] as WeekdayAvailability;
+
+  if (memberAvail === 'NA') {
+    return { available: false, reason: `Not available on ${dayKey}`, dayAvailability: 'NA' };
+  }
+
+  const shiftPeriod = classifyShiftPeriod(shift.startTime, shift.endTime);
+  const acceptableValues = PERIOD_COVERAGE[shiftPeriod];
+
+  if (!acceptableValues.includes(memberAvail)) {
+    return {
+      available: false,
+      reason: `Available ${memberAvail} only — shift is ${shiftPeriod.toLowerCase()}`,
+      dayAvailability: memberAvail,
+    };
+  }
+
+  return { available: true, reason: '', dayAvailability: memberAvail };
+}
+
+// ─── Component ────────────────────────────────────────────────
+
 export default function Scheduling() {
-  const [selectedLocation, setSelectedLocation] = useState(locations.filter((l) => l.active)[0]?.id || '');
+  const { shifts, locations, members, congregations, timeslots, getLocationById } = useAppContext();
+  const getMemberById = (id: string) => members.find((m) => m.id === id);
+  const getCongregationName = (id: string) => congregations.find((c) => c.id === id)?.name || 'Unknown';
+
+  const [selectedLocation, setSelectedLocation] = useState('');
   const [selectedWeekOffset, setSelectedWeekOffset] = useState(0);
   const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCongregation, setFilterCongregation] = useState<string>('all');
   const [filterExperience, setFilterExperience] = useState<string>('all');
+
+  // Set initial location once data loads from Supabase
+  useEffect(() => {
+    if (!selectedLocation && locations.length > 0) {
+      const first = locations.find((l) => l.active);
+      if (first) setSelectedLocation(first.id);
+    }
+  }, [locations, selectedLocation]);
 
   // Get shifts for selected location and week
   const getWeekStart = (offset: number) => {
@@ -79,6 +168,10 @@ export default function Scheduling() {
 
       // Check experience level
       if (location.experienceLevel === 'Experienced only' && member.experience !== 'Experienced') return false;
+
+      // Check member availability against this shift's day + time period
+      const { available } = checkAvailabilityMatch(member, shift);
+      if (!available) return false;
 
       // Apply filters
       if (filterCongregation !== 'all' && member.congregationId !== filterCongregation) return false;
@@ -212,10 +305,10 @@ export default function Scheduling() {
               </Badge>
               <Badge variant="outline">
                 <Users className="h-3 w-3 mr-1" />
-                {location.ageGroup}
+                {location.ageGroup || 'All ages'}
               </Badge>
-              <Badge variant="outline">{location.experienceLevel}</Badge>
-              <Badge variant="outline">Max {location.maxPublishers} publishers</Badge>
+              <Badge variant="outline">{location.experienceLevel || 'Any'}</Badge>
+              <Badge variant="outline">Max {location.maxPublishers || 3} publishers</Badge>
             </div>
             {location.notes && (
               <p className="text-sm text-neutral-600 mt-3">{location.notes}</p>
@@ -479,6 +572,15 @@ export default function Scheduling() {
                               <Badge variant="outline" className="text-xs">
                                 {member.experience}
                               </Badge>
+                              {(() => {
+                                const { dayAvailability } = checkAvailabilityMatch(member, selectedShift!);
+                                return (
+                                  <Badge className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
+                                    <Clock className="h-3 w-3 mr-0.5" />
+                                    {dayAvailability}
+                                  </Badge>
+                                );
+                              })()}
                             </div>
                             <p className="text-xs text-neutral-600 mt-1">
                               {getCongregationName(member.congregationId)} • {member.ageGroup}

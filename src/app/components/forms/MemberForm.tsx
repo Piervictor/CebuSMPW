@@ -1,5 +1,5 @@
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { useEffect, useState, useMemo } from 'react';
+import { useForm, Controller } from 'react-hook-form';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -14,16 +14,48 @@ import {
   Alert,
   AlertDescription,
 } from '../ui/alert';
-import { Checkbox } from '../ui/checkbox';
 import { toast } from 'sonner';
-import { CreateMemberSchema, UpdateMemberSchema } from '../../schemas';
-import type { MemberFormData, MemberUpdateData } from '../../schemas';
-import type { Member } from '../../data/mockData';
+import {
+  CreateMemberSchema,
+  UpdateMemberSchema,
+  zodFormResolver,
+} from '../../../schemas';
+import type { MemberFormData, MemberUpdateData } from '../../../schemas';
+import type { Member, WeekdayAvailability } from '../../data/mockData';
 import { useAppContext } from '../../hooks/useAppContext';
 import { AlertTriangle } from 'lucide-react';
 
-const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const TIMES_OF_DAY = ['Morning', 'Afternoon', 'Evening'];
+const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const;
+const WEEKDAY_LABELS: Record<string, string> = {
+  monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri',
+};
+const AVAILABILITY_OPTIONS: WeekdayAvailability[] = ['Morning', 'Half Day Morning', 'Half Day Afternoon', 'Afternoon', 'Full Day', 'Evening', 'NA'];
+const AVAILABILITY_LABELS: Record<string, string> = {
+  'Morning': 'Morning',
+  'Half Day Morning': 'HD AM',
+  'Half Day Afternoon': 'HD PM',
+  'Afternoon': 'Afternoon',
+  'Full Day': 'Full Day',
+  'Evening': 'Evening',
+  'NA': 'NA',
+};
+
+const APPEARANCE_OPTIONS = ['Excellent', 'Good', 'Average'] as const;
+const APPEARANCE_COLORS: Record<string, string> = {
+  Excellent: 'border-green-400 bg-green-50 text-green-700',
+  Good: 'border-blue-400 bg-blue-50 text-blue-700',
+  Average: 'border-amber-400 bg-amber-50 text-amber-700',
+};
+
+function calculateAge(dob: string): number | undefined {
+  if (!dob) return undefined;
+  const birth = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
 
 interface MemberFormProps {
   member?: Member;
@@ -32,38 +64,71 @@ interface MemberFormProps {
 }
 
 export function MemberForm({ member, onSuccess, onCancel }: MemberFormProps) {
-  const { createMember, updateMember, congregations, locations, isLoading, error } = useAppContext();
-
+  const { createMember, updateMember, congregations, circuits, isLoading, clearError } = useAppContext();
   const isEditMode = !!member;
   const schema = isEditMode ? UpdateMemberSchema : CreateMemberSchema;
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => { clearError(); }, [clearError]);
+
+  const defaultAvailability = {
+    monday: 'NA' as WeekdayAvailability,
+    tuesday: 'NA' as WeekdayAvailability,
+    wednesday: 'NA' as WeekdayAvailability,
+    thursday: 'NA' as WeekdayAvailability,
+    friday: 'NA' as WeekdayAvailability,
+    saturdayDays: 0,
+    sundayDays: 0,
+  };
 
   const {
     register,
     handleSubmit,
     watch,
+    control,
+    setValue,
     formState: { errors, isSubmitting },
     reset,
-  } = useForm({
-    resolver: zodResolver(schema),
+  } = useForm<MemberFormData | MemberUpdateData>({
+    resolver: zodFormResolver(schema),
     defaultValues: isEditMode
       ? {
-          name: member.name,
+          surname: member.surname,
+          firstName: member.firstName,
+          middleInitial: member.middleInitial || '',
+          circuitId: member.circuitId,
           congregationId: member.congregationId,
-          ageGroup: member.ageGroup,
-          experience: member.experience,
-          weeklyReservations: member.weeklyReservations,
-          monthlyReservations: member.monthlyReservations,
+          dateOfBirth: member.dateOfBirth || '',
+          age: member.age,
+          status: member.status,
+          appearance: member.appearance,
+          language: member.language || '',
+          availability: member.availability || defaultAvailability,
+          phone: member.phone || '',
+          email: member.email || '',
+          ageGroup: member.ageGroup || 'Adult',
+          experience: member.experience || 'New',
           weeklyLimit: member.weeklyLimit,
           monthlyLimit: member.monthlyLimit,
-          telegramHandle: member.telegramHandle,
-          email: member.email,
-          phone: member.phone,
-          languageGroup: member.languageGroup,
-          preferredDays: member.preferredDays,
-          preferredTimes: member.preferredTimes,
-          preferredLocations: member.preferredLocations,
+          weeklyReservations: member.weeklyReservations,
+          monthlyReservations: member.monthlyReservations,
+          preferredDays: member.preferredDays || [],
+          preferredTimes: member.preferredTimes || [],
+          preferredLocations: member.preferredLocations || [],
         }
       : {
+          surname: '',
+          firstName: '',
+          middleInitial: '',
+          circuitId: '',
+          congregationId: '',
+          dateOfBirth: '',
+          status: 'Active',
+          appearance: 'Good',
+          language: '',
+          availability: defaultAvailability,
+          phone: '',
+          email: '',
           ageGroup: 'Adult',
           experience: 'New',
           weeklyLimit: 2,
@@ -76,285 +141,335 @@ export function MemberForm({ member, onSuccess, onCancel }: MemberFormProps) {
         },
   });
 
-  const selectedDays = watch('preferredDays') || [];
-  const selectedTimes = watch('preferredTimes') || [];
-  const selectedLocations = watch('preferredLocations') || [];
+  const selectedCircuitId = watch('circuitId');
+  const dateOfBirth = watch('dateOfBirth');
+
+  // Auto-calculate age when DOB changes
+  useEffect(() => {
+    if (dateOfBirth) {
+      const age = calculateAge(dateOfBirth);
+      if (age !== undefined) setValue('age', age);
+    }
+  }, [dateOfBirth, setValue]);
+
+  // Filter congregations by selected circuit
+  const filteredCongregations = useMemo(
+    () => selectedCircuitId
+      ? congregations.filter((c) => c.circuitId === selectedCircuitId)
+      : congregations,
+    [selectedCircuitId, congregations]
+  );
+
+  // Reset congregation when circuit changes
+  useEffect(() => {
+    if (selectedCircuitId && !isEditMode) {
+      const currentCong = watch('congregationId');
+      const stillValid = filteredCongregations.some((c) => c.id === currentCong);
+      if (!stillValid) setValue('congregationId', '');
+    }
+  }, [selectedCircuitId, filteredCongregations, setValue, isEditMode, watch]);
 
   const onSubmit = async (data: MemberFormData | MemberUpdateData) => {
+    setFormError(null);
     try {
+      // Compute display name
+      const mi = (data as MemberFormData).middleInitial;
+      const computedName = `${(data as MemberFormData).surname}, ${(data as MemberFormData).firstName}${mi ? ` ${mi}.` : ''}`;
+
+      const payload = {
+        ...data,
+        name: computedName,
+        age: data.dateOfBirth ? calculateAge(data.dateOfBirth) : undefined,
+      };
+
+      // Debug: verify availability is included in validated form data
+      console.log('[MemberForm] onSubmit availability:', (data as MemberFormData).availability);
+
       if (isEditMode && member) {
-        await updateMember(member.id, data);
+        await updateMember(member.id, payload as Partial<Member>);
         toast.success('Member updated successfully');
       } else {
-        await createMember(data as MemberFormData);
+        await createMember(payload as Omit<Member, 'id'>);
         toast.success('Member created successfully');
         reset();
       }
       onSuccess?.();
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Operation failed';
+      setFormError(errorMsg);
       toast.error(errorMsg);
     }
   };
 
+  const onInvalid = (fieldErrors: Record<string, unknown>) => {
+    const messages = Object.entries(fieldErrors)
+      .map(([key, val]) => `${key}: ${(val as { message?: string })?.message || 'invalid'}`)
+      .join(', ');
+    toast.error(`Validation failed: ${messages}`);
+  };
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 max-h-[80vh] overflow-y-auto pr-4">
-      {error && (
+    <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-6 max-h-[80vh] overflow-y-auto pr-2">
+      {formError && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{formError}</AlertDescription>
         </Alert>
       )}
 
-      {/* Member Name */}
-      <div className="space-y-2">
-        <Label htmlFor="name">Full Name *</Label>
-        <Input
-          id="name"
-          placeholder="e.g., Sarah Thompson"
-          {...register('name')}
-          className={errors.name ? 'border-red-500' : ''}
-        />
-        {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
-      </div>
-
-      {/* Congregation */}
-      <div className="space-y-2">
-        <Label htmlFor="congregationId">Congregation *</Label>
-        <Select defaultValue={member?.congregationId || ''} {...register('congregationId')}>
-          <SelectTrigger id="congregationId" className={errors.congregationId ? 'border-red-500' : ''}>
-            <SelectValue placeholder="Select a congregation" />
-          </SelectTrigger>
-          <SelectContent>
-            {congregations.map((cong) => (
-              <SelectItem key={cong.id} value={cong.id}>
-                {cong.name} ({cong.city})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {errors.congregationId && (
-          <p className="text-sm text-red-500">{errors.congregationId.message}</p>
-        )}
-      </div>
-
-      {/* Age Group */}
-      <div className="space-y-2">
-        <Label htmlFor="ageGroup">Age Group *</Label>
-        <Select defaultValue={member?.ageGroup || 'Adult'} {...register('ageGroup')}>
-          <SelectTrigger id="ageGroup" className={errors.ageGroup ? 'border-red-500' : ''}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="Youth">Youth</SelectItem>
-            <SelectItem value="Adult">Adult</SelectItem>
-            <SelectItem value="Senior">Senior</SelectItem>
-          </SelectContent>
-        </Select>
-        {errors.ageGroup && <p className="text-sm text-red-500">{errors.ageGroup.message}</p>}
-      </div>
-
-      {/* Experience */}
-      <div className="space-y-2">
-        <Label htmlFor="experience">Experience Level *</Label>
-        <Select defaultValue={member?.experience || 'New'} {...register('experience')}>
-          <SelectTrigger id="experience" className={errors.experience ? 'border-red-500' : ''}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="New">New</SelectItem>
-            <SelectItem value="Intermediate">Intermediate</SelectItem>
-            <SelectItem value="Experienced">Experienced</SelectItem>
-          </SelectContent>
-        </Select>
-        {errors.experience && <p className="text-sm text-red-500">{errors.experience.message}</p>}
-      </div>
-
-      {/* Weekly Limit */}
-      <div className="space-y-2">
-        <Label htmlFor="weeklyLimit">Weekly Shift Limit *</Label>
-        <Input
-          id="weeklyLimit"
-          type="number"
-          min="1"
-          max="7"
-          {...register('weeklyLimit', { valueAsNumber: true })}
-          className={errors.weeklyLimit ? 'border-red-500' : ''}
-        />
-        {errors.weeklyLimit && (
-          <p className="text-sm text-red-500">{errors.weeklyLimit.message}</p>
-        )}
-      </div>
-
-      {/* Monthly Limit */}
-      <div className="space-y-2">
-        <Label htmlFor="monthlyLimit">Monthly Shift Limit *</Label>
-        <Input
-          id="monthlyLimit"
-          type="number"
-          min="1"
-          max="30"
-          {...register('monthlyLimit', { valueAsNumber: true })}
-          className={errors.monthlyLimit ? 'border-red-500' : ''}
-        />
-        {errors.monthlyLimit && (
-          <p className="text-sm text-red-500">{errors.monthlyLimit.message}</p>
-        )}
-      </div>
-
-      {/* Contact Information */}
+      {/* ─── Personal Information ─── */}
       <div className="space-y-4 p-4 bg-neutral-50 rounded-lg">
-        <p className="text-sm font-medium text-neutral-700">Contact Information</p>
+        <p className="text-sm font-semibold text-neutral-700">Personal Information</p>
 
-        <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
-          <Input
-            id="email"
-            type="email"
-            placeholder="user@example.com"
-            {...register('email')}
-            className={errors.email ? 'border-red-500' : ''}
-          />
-          {errors.email && <p className="text-sm text-red-500">{errors.email.message}</p>}
+        <div className="grid grid-cols-5 gap-3">
+          {/* Surname */}
+          <div className="col-span-2 space-y-1">
+            <Label htmlFor="surname">Surname *</Label>
+            <Input id="surname" placeholder="Dela Cruz" {...register('surname')} className={errors.surname ? 'border-red-500' : ''} />
+            {errors.surname && <p className="text-xs text-red-500">{errors.surname.message}</p>}
+          </div>
+          {/* First Name */}
+          <div className="col-span-2 space-y-1">
+            <Label htmlFor="firstName">First Name *</Label>
+            <Input id="firstName" placeholder="Juan" {...register('firstName')} className={errors.firstName ? 'border-red-500' : ''} />
+            {errors.firstName && <p className="text-xs text-red-500">{errors.firstName.message}</p>}
+          </div>
+          {/* Middle Initial */}
+          <div className="col-span-1 space-y-1">
+            <Label htmlFor="middleInitial">Middle I.</Label>
+            <Input id="middleInitial" placeholder="M" maxLength={5} {...register('middleInitial')} />
+          </div>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="phone">Phone</Label>
-          <Input
-            id="phone"
-            placeholder="+1 (555) 000-0000"
-            {...register('phone')}
-            className={errors.phone ? 'border-red-500' : ''}
-          />
-          {errors.phone && <p className="text-sm text-red-500">{errors.phone.message}</p>}
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="telegramHandle">Telegram Handle</Label>
-          <Input
-            id="telegramHandle"
-            placeholder="@username"
-            {...register('telegramHandle')}
-            className={errors.telegramHandle ? 'border-red-500' : ''}
-          />
-          {errors.telegramHandle && (
-            <p className="text-sm text-red-500">{errors.telegramHandle.message}</p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="languageGroup">Languages</Label>
-          <Input
-            id="languageGroup"
-            placeholder="e.g., English, Spanish"
-            {...register('languageGroup')}
-          />
-        </div>
-      </div>
-
-      {/* Preferred Days */}
-      <div className="space-y-3">
-        <Label>Preferred Days * (Select at least one)</Label>
         <div className="grid grid-cols-2 gap-3">
-          {DAYS_OF_WEEK.map((day) => (
-            <div key={day} className="flex items-center space-x-2">
-              <Checkbox
-                id={`day-${day}`}
-                checked={selectedDays.includes(day)}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    register('preferredDays').onChange?.({
-                      target: { value: [...selectedDays, day] },
-                    });
-                  } else {
-                    register('preferredDays').onChange?.({
-                      target: { value: selectedDays.filter((d) => d !== day) },
-                    });
-                  }
-                }}
-              />
-              <label htmlFor={`day-${day}`} className="text-sm cursor-pointer">
-                {day}
-              </label>
-            </div>
-          ))}
+          <div className="space-y-1">
+            <Label htmlFor="phone">Contact #</Label>
+            <Input id="phone" placeholder="09XX-XXX-XXXX" {...register('phone')} className={errors.phone ? 'border-red-500' : ''} />
+            {errors.phone && <p className="text-xs text-red-500">{errors.phone.message}</p>}
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" placeholder="user@example.com" {...register('email')} className={errors.email ? 'border-red-500' : ''} />
+            {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+          </div>
         </div>
-        {errors.preferredDays && (
-          <p className="text-sm text-red-500">{errors.preferredDays.message}</p>
-        )}
       </div>
 
-      {/* Preferred Times */}
-      <div className="space-y-3">
-        <Label>Preferred Times * (Select at least one)</Label>
+      {/* ─── Circuit & Congregation ─── */}
+      <div className="space-y-4 p-4 bg-neutral-50 rounded-lg">
+        <p className="text-sm font-semibold text-neutral-700">Assignment</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label>Circuit *</Label>
+            <Controller
+              name="circuitId"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger className={errors.circuitId ? 'border-red-500' : ''}>
+                    <SelectValue placeholder="Select circuit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {circuits.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            {errors.circuitId && <p className="text-xs text-red-500">{errors.circuitId.message}</p>}
+          </div>
+          <div className="space-y-1">
+            <Label>Congregation *</Label>
+            <Controller
+              name="congregationId"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange} disabled={!selectedCircuitId}>
+                  <SelectTrigger className={errors.congregationId ? 'border-red-500' : ''}>
+                    <SelectValue placeholder={selectedCircuitId ? 'Select congregation' : 'Select circuit first'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredCongregations.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            {errors.congregationId && <p className="text-xs text-red-500">{errors.congregationId.message}</p>}
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Demographics ─── */}
+      <div className="space-y-4 p-4 bg-neutral-50 rounded-lg">
+        <p className="text-sm font-semibold text-neutral-700">Demographics</p>
+
         <div className="grid grid-cols-3 gap-3">
-          {TIMES_OF_DAY.map((time) => (
-            <div key={time} className="flex items-center space-x-2">
-              <Checkbox
-                id={`time-${time}`}
-                checked={selectedTimes.includes(time)}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    register('preferredTimes').onChange?.({
-                      target: { value: [...selectedTimes, time] },
-                    });
-                  } else {
-                    register('preferredTimes').onChange?.({
-                      target: { value: selectedTimes.filter((t) => t !== time) },
-                    });
-                  }
-                }}
-              />
-              <label htmlFor={`time-${time}`} className="text-sm cursor-pointer">
-                {time}
-              </label>
-            </div>
-          ))}
+          <div className="space-y-1">
+            <Label htmlFor="dateOfBirth">Date of Birth</Label>
+            <Input id="dateOfBirth" type="date" {...register('dateOfBirth')} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="age">Age</Label>
+            <Input id="age" type="number" readOnly disabled value={dateOfBirth ? calculateAge(dateOfBirth) ?? '' : ''} className="bg-neutral-100" />
+          </div>
+          <div className="space-y-1">
+            <Label>Status</Label>
+            <Controller
+              name="status"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Active">Active</SelectItem>
+                    <SelectItem value="Inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
         </div>
-        {errors.preferredTimes && (
-          <p className="text-sm text-red-500">{errors.preferredTimes.message}</p>
-        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          {/* Appearance */}
+          <div className="space-y-1">
+            <Label>Appearance *</Label>
+            <Controller
+              name="appearance"
+              control={control}
+              render={({ field }) => (
+                <div className="flex gap-2">
+                  {APPEARANCE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => field.onChange(opt)}
+                      className={`flex-1 py-2 px-2 text-xs font-medium rounded-md border-2 transition-all ${
+                        field.value === opt
+                          ? APPEARANCE_COLORS[opt]
+                          : 'border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300'
+                      }`}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              )}
+            />
+            {errors.appearance && <p className="text-xs text-red-500">{errors.appearance.message}</p>}
+          </div>
+          {/* Language */}
+          <div className="space-y-1">
+            <Label htmlFor="language">Language</Label>
+            <Input id="language" placeholder="e.g., English, Cebuano" {...register('language')} />
+          </div>
+        </div>
       </div>
 
-      {/* Preferred Locations */}
-      <div className="space-y-3">
-        <Label>Preferred Locations (Optional)</Label>
-        <div className="space-y-2 border border-neutral-200 rounded-lg p-3 max-h-40 overflow-y-auto">
-          {locations.length === 0 ? (
-            <p className="text-sm text-neutral-500 italic">No locations available</p>
-          ) : (
-            locations.map((loc) => (
-              <div key={loc.id} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`loc-${loc.id}`}
-                  checked={selectedLocations.includes(loc.id)}
-                  onCheckedChange={(checked) => {
-                    if (checked) {
-                      register('preferredLocations').onChange?.({
-                        target: { value: [...selectedLocations, loc.id] },
-                      });
-                    } else {
-                      register('preferredLocations').onChange?.({
-                        target: {
-                          value: selectedLocations.filter((id) => id !== loc.id),
-                        },
-                      });
-                    }
-                  }}
-                />
-                <label htmlFor={`loc-${loc.id}`} className="text-sm cursor-pointer">
-                  {loc.name}
-                </label>
-              </div>
-            ))
-          )}
+      {/* ─── Availability Grid ─── */}
+      <div className="space-y-4 p-4 bg-neutral-50 rounded-lg">
+        <p className="text-sm font-semibold text-neutral-700">Weekly Availability</p>
+
+        {/* Weekday availability */}
+        <div className="border border-neutral-200 rounded-lg overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-neutral-100">
+                <th className="px-3 py-2 text-left font-medium text-neutral-600">Day</th>
+                <th className="px-3 py-2 text-left font-medium text-neutral-600">Availability</th>
+              </tr>
+            </thead>
+            <tbody>
+              {WEEKDAYS.map((day) => (
+                <tr key={day} className="border-t border-neutral-200">
+                  <td className="px-3 py-2 font-medium text-neutral-700 w-16">
+                    {WEEKDAY_LABELS[day]}
+                  </td>
+                  <td className="px-3 py-1">
+                    <Controller
+                      name={`availability.${day}`}
+                      control={control}
+                      render={({ field }) => (
+                        <div className="flex gap-1 flex-wrap">
+                          {AVAILABILITY_OPTIONS.map((opt) => (
+                            <button
+                              key={opt}
+                              type="button"
+                              title={opt}
+                              onClick={() => field.onChange(opt)}
+                              className={`px-2 py-1 rounded text-xs transition-all ${
+                                field.value === opt
+                                  ? opt === 'NA'
+                                    ? 'bg-neutral-500 text-white'
+                                    : 'bg-blue-600 text-white'
+                                  : 'bg-white border border-neutral-200 text-neutral-500 hover:border-blue-300'
+                              }`}
+                            >
+                              {AVAILABILITY_LABELS[opt] || opt}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Weekend availability (number of days) */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="saturdayDays">Saturday (days available/month)</Label>
+            <Controller
+              name="availability.saturdayDays"
+              control={control}
+              render={({ field }) => (
+                <Select value={String(field.value ?? 0)} onValueChange={(v) => field.onChange(Number(v))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[0, 1, 2, 3, 4, 5].map((n) => (
+                      <SelectItem key={n} value={String(n)}>{n} {n === 1 ? 'day' : 'days'}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="sundayDays">Sunday (days available/month)</Label>
+            <Controller
+              name="availability.sundayDays"
+              control={control}
+              render={({ field }) => (
+                <Select value={String(field.value ?? 0)} onValueChange={(v) => field.onChange(Number(v))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[0, 1, 2, 3, 4, 5].map((n) => (
+                      <SelectItem key={n} value={String(n)}>{n} {n === 1 ? 'day' : 'days'}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Form Actions */}
-      <div className="flex gap-3 pt-4 sticky bottom-0 bg-white -mx-4 px-4 py-4 border-t border-neutral-200">
+      {/* ─── Form Actions ─── */}
+      <div className="flex gap-3 pt-4 sticky bottom-0 bg-white -mx-2 px-2 py-4 border-t border-neutral-200">
         <Button type="submit" disabled={isSubmitting || isLoading} className="flex-1">
-          {isSubmitting || isLoading ? 'Saving...' : isEditMode ? 'Update Member' : 'Create Member'}
+          {isSubmitting || isLoading ? 'Saving...' : isEditMode ? 'Update Member' : 'Add Member'}
         </Button>
         <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting || isLoading}>
           Cancel

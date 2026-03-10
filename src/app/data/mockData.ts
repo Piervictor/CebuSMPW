@@ -10,37 +10,73 @@ export interface User {
   telegramHandle?: string;
 }
 
-export interface Congregation {
+export interface Circuit {
   id: string;
   name: string;
-  city: string;
+  city?: string;
+  coordinator: string;
+  notes?: string;
+}
+
+export interface Congregation {
+  id: string;
+  circuitId: string;
+  name: string;
+  city?: string;
   overseers: string[];
-  publisherCount: number;
+  publisherCount?: number;
   shiftsServed: number;
   coverageRate: number;
 }
 
 export type LocationCategory = 'Hospital' | 'Plaza' | 'Terminal' | 'Mall';
 export type AgeGroup = 'All ages' | 'Adults only' | 'Seniors excluded';
-export type ExperienceLevel = 'Any' | 'Experienced only';
+export type ExperienceLevel = 'Any' | 'Experienced only' | 'Intermediate';
 
 export interface Location {
   id: string;
+  circuitId: string;
   name: string;
   category: LocationCategory;
   city: string;
   linkedCongregations: string[];
   active: boolean;
-  ageGroup: AgeGroup;
-  experienceLevel: ExperienceLevel;
-  maxPublishers: number;
+  ageGroup?: AgeGroup;
+  experienceLevel?: ExperienceLevel;
+  maxPublishers?: number;
   notes: string;
 }
 
+export type WeekdayAvailability = 'Morning' | 'Half Day Morning' | 'Half Day Afternoon' | 'Afternoon' | 'Full Day' | 'Evening' | 'NA';
+
+export interface MemberAvailability {
+  monday: WeekdayAvailability;
+  tuesday: WeekdayAvailability;
+  wednesday: WeekdayAvailability;
+  thursday: WeekdayAvailability;
+  friday: WeekdayAvailability;
+  saturdayDays: number; // 0-4 (number of Saturdays available per month)
+  sundayDays: number;   // 0-4 (number of Sundays available per month)
+}
+
+export type MemberStatus = 'Active' | 'Inactive';
+export type MemberAppearance = 'Excellent' | 'Good' | 'Average';
+
 export interface Member {
   id: string;
-  name: string;
+  surname: string;
+  firstName: string;
+  middleInitial?: string;
+  name: string; // computed: "Surname, First Name M."
+  circuitId: string;
   congregationId: string;
+  dateOfBirth?: string; // ISO date string
+  age?: number;
+  status: MemberStatus;
+  appearance: MemberAppearance;
+  language?: string;
+  availability: MemberAvailability;
+  // Legacy / scheduling fields
   ageGroup: 'Youth' | 'Adult' | 'Senior';
   experience: 'New' | 'Intermediate' | 'Experienced';
   weeklyReservations: number;
@@ -54,6 +90,18 @@ export interface Member {
   preferredDays: string[];
   preferredTimes: string[];
   preferredLocations: string[];
+}
+
+export type DayOfWeek = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
+
+export interface Timeslot {
+  id: string;
+  locationId: string;
+  dayOfWeek: DayOfWeek;
+  startTime: string; // HH:MM
+  endTime: string;   // HH:MM
+  requiredPublishers: number;
+  active: boolean;
 }
 
 export interface Shift {
@@ -80,10 +128,29 @@ export const setCurrentUser = (user: User) => {
   currentUser = user;
 };
 
+// Circuits
+export const circuits: Circuit[] = [
+  {
+    id: 'circuit-1',
+    name: 'Metro Cebu Central Circuit',
+    city: 'Cebu City',
+    coordinator: 'Brother Santos',
+    notes: 'Handles high-density downtown and nearby urban witnessing assignments.',
+  },
+  {
+    id: 'circuit-2',
+    name: 'Metro Cebu North Circuit',
+    city: 'Mandaue',
+    coordinator: 'Brother Reyes',
+    notes: 'Coordinates northern congregations and commercial-site witnessing support.',
+  },
+];
+
 // Congregations
 export const congregations: Congregation[] = [
   {
     id: 'cong-1',
+    circuitId: 'circuit-1',
     name: 'Central Congregation',
     city: 'Downtown',
     overseers: ['Brother Smith', 'Brother Johnson'],
@@ -93,6 +160,7 @@ export const congregations: Congregation[] = [
   },
   {
     id: 'cong-2',
+    circuitId: 'circuit-2',
     name: 'Northside Congregation',
     city: 'North District',
     overseers: ['Brother Williams', 'Brother Brown'],
@@ -102,6 +170,7 @@ export const congregations: Congregation[] = [
   },
   {
     id: 'cong-3',
+    circuitId: 'circuit-1',
     name: 'Riverside Congregation',
     city: 'Riverside',
     overseers: ['Brother Davis', 'Brother Miller'],
@@ -111,6 +180,7 @@ export const congregations: Congregation[] = [
   },
   {
     id: 'cong-4',
+    circuitId: 'circuit-2',
     name: 'Westend Congregation',
     city: 'West End',
     overseers: ['Brother Wilson', 'Brother Moore'],
@@ -124,6 +194,7 @@ export const congregations: Congregation[] = [
 export const locations: Location[] = [
   {
     id: 'loc-1',
+    circuitId: 'circuit-1',
     name: 'City General Hospital',
     category: 'Hospital',
     city: 'Downtown',
@@ -136,6 +207,7 @@ export const locations: Location[] = [
   },
   {
     id: 'loc-2',
+    circuitId: 'circuit-1',
     name: 'Central Plaza',
     category: 'Plaza',
     city: 'Downtown',
@@ -148,6 +220,7 @@ export const locations: Location[] = [
   },
   {
     id: 'loc-3',
+    circuitId: 'circuit-1',
     name: 'Union Station Terminal',
     category: 'Terminal',
     city: 'Downtown',
@@ -160,6 +233,7 @@ export const locations: Location[] = [
   },
   {
     id: 'loc-4',
+    circuitId: 'circuit-2',
     name: 'Riverside Mall',
     category: 'Mall',
     city: 'Riverside',
@@ -172,6 +246,7 @@ export const locations: Location[] = [
   },
   {
     id: 'loc-5',
+    circuitId: 'circuit-2',
     name: 'Northside Shopping Center',
     category: 'Mall',
     city: 'North District',
@@ -184,6 +259,7 @@ export const locations: Location[] = [
   },
   {
     id: 'loc-6',
+    circuitId: 'circuit-2',
     name: 'Westend Plaza',
     category: 'Plaza',
     city: 'West End',
@@ -200,8 +276,18 @@ export const locations: Location[] = [
 export const members: Member[] = [
   {
     id: 'mem-1',
-    name: 'Sarah Thompson',
+    surname: 'Thompson',
+    firstName: 'Sarah',
+    middleInitial: 'A',
+    name: 'Thompson, Sarah A.',
+    circuitId: 'circuit-1',
     congregationId: 'cong-1',
+    dateOfBirth: '1990-05-15',
+    age: 35,
+    status: 'Active',
+    appearance: 'Excellent',
+    language: 'English',
+    availability: { monday: 'Morning', tuesday: 'NA', wednesday: 'Full Day', thursday: 'NA', friday: 'Morning', saturdayDays: 2, sundayDays: 0 },
     ageGroup: 'Adult',
     experience: 'Experienced',
     weeklyReservations: 2,
@@ -218,8 +304,18 @@ export const members: Member[] = [
   },
   {
     id: 'mem-2',
-    name: 'Michael Chen',
+    surname: 'Chen',
+    firstName: 'Michael',
+    middleInitial: 'L',
+    name: 'Chen, Michael L.',
+    circuitId: 'circuit-1',
     congregationId: 'cong-1',
+    dateOfBirth: '1988-11-22',
+    age: 37,
+    status: 'Active',
+    appearance: 'Good',
+    language: 'English, Mandarin',
+    availability: { monday: 'NA', tuesday: 'Afternoon', wednesday: 'NA', thursday: 'Afternoon', friday: 'NA', saturdayDays: 4, sundayDays: 4 },
     ageGroup: 'Adult',
     experience: 'Experienced',
     weeklyReservations: 1,
@@ -235,8 +331,17 @@ export const members: Member[] = [
   },
   {
     id: 'mem-3',
-    name: 'Emily Rodriguez',
+    surname: 'Rodriguez',
+    firstName: 'Emily',
+    name: 'Rodriguez, Emily',
+    circuitId: 'circuit-1',
     congregationId: 'cong-1',
+    dateOfBirth: '2003-02-10',
+    age: 23,
+    status: 'Active',
+    appearance: 'Average',
+    language: 'English',
+    availability: { monday: 'NA', tuesday: 'NA', wednesday: 'NA', thursday: 'NA', friday: 'NA', saturdayDays: 3, sundayDays: 0 },
     ageGroup: 'Youth',
     experience: 'New',
     weeklyReservations: 1,
@@ -250,8 +355,18 @@ export const members: Member[] = [
   },
   {
     id: 'mem-4',
-    name: 'Robert Anderson',
+    surname: 'Anderson',
+    firstName: 'Robert',
+    middleInitial: 'J',
+    name: 'Anderson, Robert J.',
+    circuitId: 'circuit-1',
     congregationId: 'cong-2',
+    dateOfBirth: '1960-08-03',
+    age: 65,
+    status: 'Active',
+    appearance: 'Good',
+    language: 'English',
+    availability: { monday: 'NA', tuesday: 'Morning', wednesday: 'NA', thursday: 'Morning', friday: 'NA', saturdayDays: 0, sundayDays: 0 },
     ageGroup: 'Senior',
     experience: 'Experienced',
     weeklyReservations: 2,
@@ -267,8 +382,17 @@ export const members: Member[] = [
   },
   {
     id: 'mem-5',
-    name: 'Jennifer Martinez',
+    surname: 'Martinez',
+    firstName: 'Jennifer',
+    name: 'Martinez, Jennifer',
+    circuitId: 'circuit-1',
     congregationId: 'cong-2',
+    dateOfBirth: '1985-07-20',
+    age: 40,
+    status: 'Active',
+    appearance: 'Good',
+    language: 'English, Spanish',
+    availability: { monday: 'Afternoon', tuesday: 'NA', wednesday: 'Afternoon', thursday: 'NA', friday: 'Afternoon', saturdayDays: 0, sundayDays: 0 },
     ageGroup: 'Adult',
     experience: 'Intermediate',
     weeklyReservations: 1,
@@ -284,8 +408,17 @@ export const members: Member[] = [
   },
   {
     id: 'mem-6',
-    name: 'David Kim',
+    surname: 'Kim',
+    firstName: 'David',
+    name: 'Kim, David',
+    circuitId: 'circuit-2',
     congregationId: 'cong-3',
+    dateOfBirth: '1992-03-12',
+    age: 33,
+    status: 'Active',
+    appearance: 'Excellent',
+    language: 'English, Korean',
+    availability: { monday: 'Full Day', tuesday: 'Full Day', wednesday: 'Full Day', thursday: 'Full Day', friday: 'Full Day', saturdayDays: 4, sundayDays: 2 },
     ageGroup: 'Adult',
     experience: 'Experienced',
     weeklyReservations: 3,
@@ -301,8 +434,17 @@ export const members: Member[] = [
   },
   {
     id: 'mem-7',
-    name: 'Lisa Johnson',
+    surname: 'Johnson',
+    firstName: 'Lisa',
+    name: 'Johnson, Lisa',
+    circuitId: 'circuit-2',
     congregationId: 'cong-3',
+    dateOfBirth: '1995-09-30',
+    age: 30,
+    status: 'Active',
+    appearance: 'Average',
+    language: 'English',
+    availability: { monday: 'NA', tuesday: 'NA', wednesday: 'NA', thursday: 'NA', friday: 'NA', saturdayDays: 4, sundayDays: 4 },
     ageGroup: 'Adult',
     experience: 'Intermediate',
     weeklyReservations: 1,
@@ -316,8 +458,17 @@ export const members: Member[] = [
   },
   {
     id: 'mem-8',
-    name: 'James Wilson',
+    surname: 'Wilson',
+    firstName: 'James',
+    name: 'Wilson, James',
+    circuitId: 'circuit-2',
     congregationId: 'cong-4',
+    dateOfBirth: '1998-01-05',
+    age: 28,
+    status: 'Active',
+    appearance: 'Average',
+    language: 'English',
+    availability: { monday: 'NA', tuesday: 'NA', wednesday: 'NA', thursday: 'NA', friday: 'NA', saturdayDays: 2, sundayDays: 0 },
     ageGroup: 'Adult',
     experience: 'New',
     weeklyReservations: 0,
@@ -330,8 +481,17 @@ export const members: Member[] = [
   },
   {
     id: 'mem-9',
-    name: 'Patricia Lee',
+    surname: 'Lee',
+    firstName: 'Patricia',
+    name: 'Lee, Patricia',
+    circuitId: 'circuit-2',
     congregationId: 'cong-4',
+    dateOfBirth: '1958-12-18',
+    age: 67,
+    status: 'Active',
+    appearance: 'Good',
+    language: 'English',
+    availability: { monday: 'NA', tuesday: 'Morning', wednesday: 'NA', thursday: 'Morning', friday: 'NA', saturdayDays: 3, sundayDays: 0 },
     ageGroup: 'Senior',
     experience: 'Experienced',
     weeklyReservations: 2,
@@ -347,8 +507,18 @@ export const members: Member[] = [
   },
   {
     id: 'mem-10',
-    name: 'Daniel Brown',
+    surname: 'Brown',
+    firstName: 'Daniel',
+    middleInitial: 'R',
+    name: 'Brown, Daniel R.',
+    circuitId: 'circuit-1',
     congregationId: 'cong-1',
+    dateOfBirth: '1987-04-25',
+    age: 38,
+    status: 'Inactive',
+    appearance: 'Good',
+    language: 'English',
+    availability: { monday: 'Afternoon', tuesday: 'NA', wednesday: 'NA', thursday: 'NA', friday: 'Afternoon', saturdayDays: 0, sundayDays: 0 },
     ageGroup: 'Adult',
     experience: 'Intermediate',
     weeklyReservations: 2,
@@ -429,11 +599,13 @@ const generateShifts = (): Shift[] => {
 export const shifts = generateShifts();
 
 // Helper functions
+export const getCircuitById = (id: string) => circuits.find((c) => c.id === id);
 export const getCongregationById = (id: string) => congregations.find((c) => c.id === id);
 export const getLocationById = (id: string) => locations.find((l) => l.id === id);
 export const getMemberById = (id: string) => members.find((m) => m.id === id);
 export const getShiftById = (id: string) => shifts.find((s) => s.id === id);
 
+export const getCircuitName = (id: string) => getCircuitById(id)?.name || 'Unknown';
 export const getLocationName = (id: string) => getLocationById(id)?.name || 'Unknown';
 export const getCongregationName = (id: string) => getCongregationById(id)?.name || 'Unknown';
 export const getMemberName = (id: string) => getMemberById(id)?.name || 'Unknown';

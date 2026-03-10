@@ -167,7 +167,7 @@ export const memberService = {
    * Filters by age, experience, and congregation link
    */
   getEligibleMembers: async (
-    locationId: string,
+    _locationId: string,
     locationRequirements: {
       ageGroup: string;
       experienceLevel: string;

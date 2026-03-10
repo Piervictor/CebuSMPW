@@ -65,7 +65,7 @@ export const locationService = {
       if (!locationData.linkedCongregations || locationData.linkedCongregations.length === 0) {
         throw new Error('At least one congregation must be linked');
       }
-      if (locationData.maxPublishers < 1) {
+      if (locationData.maxPublishers != null && locationData.maxPublishers < 1) {
         throw new Error('Maximum publishers must be at least 1');
       }
 

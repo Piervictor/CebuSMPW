@@ -5,6 +5,33 @@
  */
 
 import { z } from 'zod';
+import type { FieldErrors, FieldValues, Resolver } from 'react-hook-form';
+
+/**
+ * Custom Zod resolver for react-hook-form.
+ * Bypasses @hookform/resolvers/zod which has a Vite bundling bug:
+ * the resolver imports zod/v4/core's $ZodError but Vite tree-shakes it
+ * to the wrong class (plain vs Error subclass), so instanceof always fails.
+ * This uses Zod's classic .safeParseAsync() API which avoids the issue.
+ */
+export function zodFormResolver<T extends z.ZodType>(
+  schema: T,
+): Resolver<z.infer<T>> {
+  return async (values: FieldValues) => {
+    const result = await schema.safeParseAsync(values);
+    if (result.success) {
+      return { values: result.data, errors: {} as FieldErrors };
+    }
+    const fieldErrors: FieldErrors = {};
+    for (const issue of result.error.issues) {
+      const path = issue.path.map(String).join('.');
+      if (path && !fieldErrors[path]) {
+        fieldErrors[path] = { type: issue.code, message: issue.message };
+      }
+    }
+    return { values: {}, errors: fieldErrors };
+  };
+}
 
 /**
  * User/Member Role validation
@@ -37,6 +64,72 @@ export const MemberAgeGroupSchema = z.enum(['Youth', 'Adult', 'Senior']);
 export const MemberExperienceSchema = z.enum(['New', 'Intermediate', 'Experienced']);
 
 /**
+ * CIRCUIT SCHEMA
+ */
+export const CircuitSchema = z.object({
+  id: z.string().optional(),
+  name: z
+    .string()
+    .min(2, 'Circuit name must be at least 2 characters')
+    .max(100, 'Circuit name is too long'),
+  city: z
+    .string()
+    .max(50, 'City name is too long')
+    .optional()
+    .default(''),
+  coordinator: z
+    .string()
+    .min(2, 'Coordinator name must be at least 2 characters')
+    .max(100, 'Coordinator name is too long'),
+  notes: z
+    .string()
+    .max(1000, 'Notes are too long')
+    .optional()
+    .default(''),
+});
+
+export const CreateCircuitSchema = CircuitSchema.omit({ id: true });
+export const UpdateCircuitSchema = CircuitSchema.partial().omit({ id: true });
+
+export type CircuitFormData = z.infer<typeof CreateCircuitSchema>;
+export type CircuitUpdateData = z.infer<typeof UpdateCircuitSchema>;
+
+/**
+ * DAY OF WEEK
+ */
+export const DayOfWeekSchema = z.enum([
+  'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+]);
+
+/**
+ * TIMESLOT SCHEMA
+ */
+export const TimeslotSchema = z.object({
+  id: z.string().optional(),
+  locationId: z.string().min(1, 'Location is required'),
+  dayOfWeek: DayOfWeekSchema,
+  startTime: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/, 'Start time must be in HH:MM format'),
+  endTime: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/, 'End time must be in HH:MM format'),
+  requiredPublishers: z
+    .number()
+    .min(2, 'At least 2 publishers required')
+    .max(6, 'Maximum 6 publishers')
+    .int('Must be a whole number')
+    .default(2),
+  active: z.boolean().default(true),
+});
+
+export const CreateTimeslotSchema = TimeslotSchema.omit({ id: true });
+export const UpdateTimeslotSchema = TimeslotSchema.partial().omit({ id: true });
+
+export type TimeslotFormData = z.infer<typeof CreateTimeslotSchema>;
+export type TimeslotUpdateData = z.infer<typeof UpdateTimeslotSchema>;
+
+/**
  * SHIFT SCHEMA
  */
 export const ShiftSchema = z.object({
@@ -63,37 +156,100 @@ export const ShiftSchema = z.object({
 export type ShiftFormData = z.infer<typeof ShiftSchema>;
 
 /**
+ * Member Status validation
+ */
+export const MemberStatusSchema = z.enum(['Active', 'Inactive']);
+
+/**
+ * Member Appearance validation
+ */
+export const MemberAppearanceSchema = z.enum(['Excellent', 'Good', 'Average']);
+
+/**
+ * Weekday Availability validation
+ */
+export const WeekdayAvailabilitySchema = z.enum(['Morning', 'Half Day Morning', 'Half Day Afternoon', 'Afternoon', 'Full Day', 'Evening', 'NA']);
+
+/**
+ * Member Availability schema
+ */
+export const MemberAvailabilitySchema = z.object({
+  monday: WeekdayAvailabilitySchema.default('NA'),
+  tuesday: WeekdayAvailabilitySchema.default('NA'),
+  wednesday: WeekdayAvailabilitySchema.default('NA'),
+  thursday: WeekdayAvailabilitySchema.default('NA'),
+  friday: WeekdayAvailabilitySchema.default('NA'),
+  saturdayDays: z.number().min(0).max(5).int().default(0),
+  sundayDays: z.number().min(0).max(5).int().default(0),
+});
+
+/**
  * MEMBER SCHEMA
  */
 export const MemberSchema = z.object({
   id: z.string().optional(),
-  name: z
+  surname: z
     .string()
-    .min(2, 'Name must be at least 2 characters')
-    .max(100, 'Name is too long'),
+    .min(1, 'Surname is required')
+    .max(100, 'Surname is too long'),
+  firstName: z
+    .string()
+    .min(1, 'First name is required')
+    .max(100, 'First name is too long'),
+  middleInitial: z
+    .string()
+    .max(5, 'Middle initial is too long')
+    .optional()
+    .or(z.literal('')),
+  name: z.string().optional(), // computed field
+  circuitId: z
+    .string()
+    .min(1, 'Circuit is required'),
   congregationId: z
     .string()
     .min(1, 'Congregation is required'),
-  ageGroup: MemberAgeGroupSchema,
-  experience: MemberExperienceSchema,
+  dateOfBirth: z
+    .string()
+    .optional()
+    .or(z.literal('')),
+  age: z
+    .number()
+    .optional(),
+  status: MemberStatusSchema.default('Active'),
+  appearance: MemberAppearanceSchema,
+  language: z
+    .string()
+    .optional()
+    .or(z.literal('')),
+  availability: MemberAvailabilitySchema.default({
+    monday: 'NA', tuesday: 'NA', wednesday: 'NA', thursday: 'NA', friday: 'NA',
+    saturdayDays: 0, sundayDays: 0,
+  }),
+  // Legacy / scheduling fields
+  ageGroup: MemberAgeGroupSchema.default('Adult'),
+  experience: MemberExperienceSchema.default('New'),
   weeklyReservations: z
     .number()
     .min(0, 'Cannot be negative')
-    .int('Must be a whole number'),
+    .int('Must be a whole number')
+    .default(0),
   monthlyReservations: z
     .number()
     .min(0, 'Cannot be negative')
-    .int('Must be a whole number'),
+    .int('Must be a whole number')
+    .default(0),
   weeklyLimit: z
     .number()
     .min(1, 'Weekly limit must be at least 1')
     .max(7, 'Weekly limit cannot exceed 7')
-    .int('Must be a whole number'),
+    .int('Must be a whole number')
+    .default(2),
   monthlyLimit: z
     .number()
     .min(1, 'Monthly limit must be at least 1')
     .max(30, 'Monthly limit cannot exceed 30')
-    .int('Must be a whole number'),
+    .int('Must be a whole number')
+    .default(8),
   telegramHandle: z
     .string()
     .regex(/^@?[\w]{3,32}$/, 'Invalid Telegram handle')
@@ -106,7 +262,6 @@ export const MemberSchema = z.object({
     .or(z.literal('')),
   phone: z
     .string()
-    .regex(/^\+?[\d\s\-()]{7,}$/, 'Invalid phone number')
     .optional()
     .or(z.literal('')),
   languageGroup: z
@@ -114,10 +269,10 @@ export const MemberSchema = z.object({
     .optional(),
   preferredDays: z
     .array(z.string())
-    .min(1, 'Select at least one preferred day'),
+    .default([]),
   preferredTimes: z
     .array(z.string())
-    .min(1, 'Select at least one preferred time'),
+    .default([]),
   preferredLocations: z
     .array(z.string())
     .optional(),
@@ -134,6 +289,9 @@ export type MemberUpdateData = z.infer<typeof UpdateMemberSchema>;
  */
 export const LocationSchema = z.object({
   id: z.string().optional(),
+  circuitId: z
+    .string()
+    .min(1, 'Circuit is required'),
   name: z
     .string()
     .min(2, 'Location name must be at least 2 characters')
@@ -149,18 +307,20 @@ export const LocationSchema = z.object({
   active: z
     .boolean()
     .default(true),
-  ageGroup: AgeGroupSchema.default('All ages'),
-  experienceLevel: ExperienceLevelSchema.default('Any'),
+  ageGroup: AgeGroupSchema.optional().default('All ages'),
+  experienceLevel: ExperienceLevelSchema.optional().default('Any'),
   maxPublishers: z
     .number()
     .min(1, 'Maximum publishers must be at least 1')
     .max(10, 'Maximum publishers cannot exceed 10')
-    .int('Must be a whole number'),
+    .int('Must be a whole number')
+    .optional()
+    .default(3),
   notes: z
     .string()
     .max(1000, 'Notes are too long')
     .optional()
-    .or(z.literal('')),
+    .default(''),
 });
 
 export const CreateLocationSchema = LocationSchema.omit({ id: true });
@@ -174,14 +334,18 @@ export type LocationUpdateData = z.infer<typeof UpdateLocationSchema>;
  */
 export const CongregationSchema = z.object({
   id: z.string().optional(),
+  circuitId: z
+    .string()
+    .min(1, 'Circuit is required'),
   name: z
     .string()
     .min(2, 'Congregation name must be at least 2 characters')
     .max(100, 'Name is too long'),
   city: z
     .string()
-    .min(2, 'City must be at least 2 characters')
-    .max(50, 'City name is too long'),
+    .max(50, 'City name is too long')
+    .optional()
+    .default(''),
   overseers: z
     .array(z.string())
     .default([]),
@@ -189,6 +353,7 @@ export const CongregationSchema = z.object({
     .number()
     .min(0, 'Publisher count cannot be negative')
     .int('Must be a whole number')
+    .optional()
     .default(0),
   shiftsServed: z
     .number()
@@ -233,9 +398,9 @@ export function validateData<T>(
   } catch (error) {
     if (error instanceof z.ZodError) {
       const errors: Record<string, string> = {};
-      error.errors.forEach((err) => {
-        const path = err.path.join('.');
-        errors[path] = err.message;
+      error.issues.forEach((issue) => {
+        const path = issue.path.join('.');
+        errors[path] = issue.message;
       });
       return { success: false, errors };
     }

@@ -45,10 +45,7 @@ export const congregationService = {
       if (!congregationData.name?.trim()) {
         throw new Error('Congregation name is required');
       }
-      if (!congregationData.city?.trim()) {
-        throw new Error('City is required');
-      }
-      if (congregationData.publisherCount < 0) {
+      if (congregationData.publisherCount != null && congregationData.publisherCount < 0) {
         throw new Error('Publisher count cannot be negative');
       }
 
@@ -212,7 +209,7 @@ export const congregationService = {
 
       return allCongregations.filter((cong) =>
         cong.name.toLowerCase().includes(lowerQuery) ||
-        cong.city.toLowerCase().includes(lowerQuery)
+        (cong.city || '').toLowerCase().includes(lowerQuery)
       );
     } catch (error) {
       console.error('Error searching congregations:', error);
@@ -226,7 +223,7 @@ export const congregationService = {
   getCongregationsByCity: async (city: string): Promise<Congregation[]> => {
     try {
       const allCongregations = await congregationService.getAllCongregations();
-      return allCongregations.filter((cong) => cong.city.toLowerCase() === city.toLowerCase());
+      return allCongregations.filter((cong) => (cong.city || '').toLowerCase() === city.toLowerCase());
     } catch (error) {
       console.error(`Error fetching congregations for city ${city}:`, error);
       throw error;

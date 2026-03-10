@@ -4,6 +4,8 @@
  * Can switch between mock and real API by changing BASE_URL
  */
 
+import type { Congregation, Location, Member, Shift } from '../app/data/mockData';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 interface RequestConfig {
@@ -90,32 +92,12 @@ export class ApiError extends Error {
 export const apiService = {
   // ============ SHIFT ENDPOINTS ============
   shifts: {
-    getAll: () =>
-      apiRequest<{
-        id: string;
-        locationId: string;
-        date: string;
-        startTime: string;
-        endTime: string;
-        requiredCount: number;
-        assignedMembers: string[];
-        status: 'open' | 'partial' | 'filled';
-      }[]>('/shifts'),
+    getAll: () => apiRequest<Shift[]>('/shifts'),
 
-    getById: (id: string) =>
-      apiRequest<{
-        id: string;
-        locationId: string;
-        date: string;
-        startTime: string;
-        endTime: string;
-        requiredCount: number;
-        assignedMembers: string[];
-        status: 'open' | 'partial' | 'filled';
-      }>(`/shifts/${id}`),
+    getById: (id: string) => apiRequest<Shift>(`/shifts/${id}`),
 
     update: (id: string, data: unknown) =>
-      apiRequest(`/shifts/${id}`, { method: 'PUT', body: data }),
+      apiRequest<Shift>(`/shifts/${id}`, { method: 'PUT', body: data }),
 
     assignMember: (shiftId: string, memberId: string) =>
       apiRequest(`/shifts/${shiftId}/assign`, {
@@ -132,50 +114,34 @@ export const apiService = {
 
   // ============ MEMBER ENDPOINTS ============
   members: {
-    getAll: () =>
-      apiRequest<
-        {
-          id: string;
-          name: string;
-          congregationId: string;
-        }[]
-      >('/members'),
+    getAll: () => apiRequest<Member[]>('/members'),
 
-    getById: (id: string) =>
-      apiRequest(`/members/${id}`),
+    getById: (id: string) => apiRequest<Member>(`/members/${id}`),
 
     create: (data: unknown) =>
-      apiRequest('/members', { method: 'POST', body: data }),
+      apiRequest<Member>('/members', { method: 'POST', body: data }),
 
     update: (id: string, data: unknown) =>
-      apiRequest(`/members/${id}`, { method: 'PUT', body: data }),
+      apiRequest<Member>(`/members/${id}`, { method: 'PUT', body: data }),
 
     delete: (id: string) =>
       apiRequest(`/members/${id}`, { method: 'DELETE' }),
 
     getByCongregation: (congregationId: string) =>
-      apiRequest(`/members?congregationId=${congregationId}`),
+      apiRequest<Member[]>(`/members?congregationId=${congregationId}`),
   },
 
   // ============ LOCATION ENDPOINTS ============
   locations: {
-    getAll: () =>
-      apiRequest<
-        {
-          id: string;
-          name: string;
-          category: string;
-        }[]
-      >('/locations'),
+    getAll: () => apiRequest<Location[]>('/locations'),
 
-    getById: (id: string) =>
-      apiRequest(`/locations/${id}`),
+    getById: (id: string) => apiRequest<Location>(`/locations/${id}`),
 
     create: (data: unknown) =>
-      apiRequest('/locations', { method: 'POST', body: data }),
+      apiRequest<Location>('/locations', { method: 'POST', body: data }),
 
     update: (id: string, data: unknown) =>
-      apiRequest(`/locations/${id}`, { method: 'PUT', body: data }),
+      apiRequest<Location>(`/locations/${id}`, { method: 'PUT', body: data }),
 
     delete: (id: string) =>
       apiRequest(`/locations/${id}`, { method: 'DELETE' }),
@@ -183,22 +149,15 @@ export const apiService = {
 
   // ============ CONGREGATION ENDPOINTS ============
   congregations: {
-    getAll: () =>
-      apiRequest<
-        {
-          id: string;
-          name: string;
-        }[]
-      >('/congregations'),
+    getAll: () => apiRequest<Congregation[]>('/congregations'),
 
-    getById: (id: string) =>
-      apiRequest(`/congregations/${id}`),
+    getById: (id: string) => apiRequest<Congregation>(`/congregations/${id}`),
 
     create: (data: unknown) =>
-      apiRequest('/congregations', { method: 'POST', body: data }),
+      apiRequest<Congregation>('/congregations', { method: 'POST', body: data }),
 
     update: (id: string, data: unknown) =>
-      apiRequest(`/congregations/${id}`, { method: 'PUT', body: data }),
+      apiRequest<Congregation>(`/congregations/${id}`, { method: 'PUT', body: data }),
 
     delete: (id: string) =>
       apiRequest(`/congregations/${id}`, { method: 'DELETE' }),

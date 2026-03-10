@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useState } from 'react';
-import { currentUser } from '../../data/mockData';
+import { useAppContext } from '../../hooks/useAppContext';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['circuit-admin', 'congregation-admin'] },
@@ -30,6 +30,11 @@ const navigation = [
 export function MainLayout() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { currentUser } = useAppContext();
+
+  if (!currentUser) {
+    return null;
+  }
 
   const filteredNavigation = navigation.filter((item) =>
     item.roles.includes(currentUser.role)

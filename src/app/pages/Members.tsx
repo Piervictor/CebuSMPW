@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -33,16 +33,18 @@ import {
 import { MemberForm } from '../components/forms/MemberForm';
 import { useAppContext } from '../hooks/useAppContext';
 import type { Member } from '../data/mockData';
-import { getCongregationName, getLocationName } from '../data/mockData';
 import { Search, Users, AlertCircle, Calendar, MapPin, Plus, Edit, Trash2, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Members() {
-  const { members, congregations, shifts, deleteMember, error, isLoading } = useAppContext();
+  const { members, congregations, circuits, locations, shifts, deleteMember, error, isLoading } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Look up names from live Supabase data
+  const getCircuitName = (id: string) => circuits.find((c) => c.id === id)?.name || 'Unknown';
+  const getCongregationName = (id: string) => congregations.find((c) => c.id === id)?.name || 'Unknown';
+  const getLocationName = (id: string) => locations.find((l) => l.id === id)?.name || 'Unknown';
   const [selectedCongregation, setSelectedCongregation] = useState<string>('all');
-  const [selectedAgeGroup, setSelectedAgeGroup] = useState<string>('all');
-  const [selectedExperience, setSelectedExperience] = useState<string>('all');
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [formDialogOpen, setFormDialogOpen] = useState(false);
@@ -50,13 +52,22 @@ export default function Members() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [memberToDelete, setMemberToDelete] = useState<Member | null>(null);
 
+  // Keep selectedMember in sync when members array updates (e.g. after edit/create)
+  useEffect(() => {
+    if (selectedMember) {
+      const fresh = members.find((m) => m.id === selectedMember.id);
+      if (fresh && fresh !== selectedMember) {
+        setSelectedMember(fresh);
+      }
+    }
+  }, [members, selectedMember]);
+
   const filteredMembers = members.filter((member) => {
-    const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const fullName = `${member.surname} ${member.firstName} ${member.middleInitial || ''}`.toLowerCase();
+    const matchesSearch = fullName.includes(searchTerm.toLowerCase()) || member.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCongregation = selectedCongregation === 'all' || member.congregationId === selectedCongregation;
-    const matchesAgeGroup = selectedAgeGroup === 'all' || member.ageGroup === selectedAgeGroup;
-    const matchesExperience = selectedExperience === 'all' || member.experience === selectedExperience;
     
-    return matchesSearch && matchesCongregation && matchesAgeGroup && matchesExperience;
+    return matchesSearch && matchesCongregation;
   });
 
   const openMemberDetails = (member: Member) => {
@@ -193,8 +204,8 @@ export default function Members() {
           <CardDescription>Search and filter members</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="md:col-span-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-neutral-400" />
                 <Input
@@ -221,32 +232,6 @@ export default function Members() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Select value={selectedAgeGroup} onValueChange={setSelectedAgeGroup}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Age Group" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Age Groups</SelectItem>
-                  <SelectItem value="Youth">Youth</SelectItem>
-                  <SelectItem value="Adult">Adult</SelectItem>
-                  <SelectItem value="Senior">Senior</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Select value={selectedExperience} onValueChange={setSelectedExperience}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Experience" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Experience Levels</SelectItem>
-                  <SelectItem value="New">New</SelectItem>
-                  <SelectItem value="Intermediate">Intermediate</SelectItem>
-                  <SelectItem value="Experienced">Experienced</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -263,76 +248,51 @@ export default function Members() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
+                <TableHead>Surname</TableHead>
+                <TableHead>First Name</TableHead>
+                <TableHead>Contact #</TableHead>
                 <TableHead>Congregation</TableHead>
-                <TableHead>Age Group</TableHead>
-                <TableHead>Experience</TableHead>
-                <TableHead>This Week</TableHead>
-                <TableHead>This Month</TableHead>
+                <TableHead>Circuit</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Appearance</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredMembers.map((member) => {
-                const nearWeeklyLimit = member.weeklyReservations >= member.weeklyLimit - 1;
-                const nearMonthlyLimit = member.monthlyReservations >= member.monthlyLimit - 2;
+                const appearanceColor = member.appearance === 'Excellent'
+                  ? 'border-green-300 text-green-700 bg-green-50'
+                  : member.appearance === 'Good'
+                  ? 'border-blue-300 text-blue-700 bg-blue-50'
+                  : 'border-amber-300 text-amber-700 bg-amber-50';
                 
                 return (
                   <TableRow key={member.id}>
+                    <TableCell className="font-medium">{member.surname}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 bg-neutral-100 rounded-full flex items-center justify-center">
-                          <span className="text-xs font-medium text-neutral-700">
-                            {member.name.split(' ').map((n) => n[0]).join('')}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="font-medium">{member.name}</p>
-                          {member.languageGroup && (
-                            <p className="text-xs text-neutral-500">{member.languageGroup}</p>
-                          )}
-                        </div>
-                      </div>
+                      {member.firstName}{member.middleInitial ? ` ${member.middleInitial}.` : ''}
+                    </TableCell>
+                    <TableCell className="text-neutral-600">
+                      {member.phone || '—'}
                     </TableCell>
                     <TableCell className="text-neutral-600">
                       {getCongregationName(member.congregationId)}
                     </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={
-                          member.ageGroup === 'Youth'
-                            ? 'border-blue-300 text-blue-700'
-                            : member.ageGroup === 'Senior'
-                            ? 'border-purple-300 text-purple-700'
-                            : 'border-green-300 text-green-700'
-                        }
-                      >
-                        {member.ageGroup}
-                      </Badge>
+                    <TableCell className="text-neutral-600">
+                      {member.circuitId ? getCircuitName(member.circuitId) : '—'}
                     </TableCell>
                     <TableCell>
                       <Badge
-                        variant={member.experience === 'Experienced' ? 'default' : 'secondary'}
+                        variant={member.status === 'Active' ? 'default' : 'secondary'}
+                        className={member.status === 'Active' ? 'bg-green-100 text-green-800 hover:bg-green-100' : ''}
                       >
-                        {member.experience}
+                        {member.status || 'Active'}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className={nearWeeklyLimit ? 'text-amber-600 font-medium' : ''}>
-                          {member.weeklyReservations}/{member.weeklyLimit}
-                        </span>
-                        {nearWeeklyLimit && <AlertCircle className="h-4 w-4 text-amber-500" />}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className={nearMonthlyLimit ? 'text-amber-600 font-medium' : ''}>
-                          {member.monthlyReservations}/{member.monthlyLimit}
-                        </span>
-                        {nearMonthlyLimit && <AlertCircle className="h-4 w-4 text-amber-500" />}
-                      </div>
+                      <Badge variant="outline" className={appearanceColor}>
+                        {member.appearance || '—'}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right space-x-2">
                       <Button
@@ -378,17 +338,17 @@ export default function Members() {
                 <SheetTitle className="flex items-center gap-3">
                   <div className="h-12 w-12 bg-neutral-100 rounded-full flex items-center justify-center">
                     <span className="text-base font-medium text-neutral-700">
-                      {selectedMember.name.split(' ').map((n) => n[0]).join('')}
+                      {selectedMember.surname[0]}{selectedMember.firstName[0]}
                     </span>
                   </div>
                   <div>
                     <div>{selectedMember.name}</div>
                     <div className="text-sm text-neutral-500 font-normal">
-                      {getCongregationName(selectedMember.congregationId)}
+                      {getCongregationName(selectedMember.congregationId)} &middot; {selectedMember.circuitId ? getCircuitName(selectedMember.circuitId) : ''}
                     </div>
                   </div>
                 </SheetTitle>
-                <SheetDescription>Member details and schedule history</SheetDescription>
+                <SheetDescription>Member details and availability</SheetDescription>
               </SheetHeader>
 
               <div className="mt-6 space-y-6">
@@ -398,104 +358,95 @@ export default function Members() {
                     <CardTitle className="text-base">Contact Information</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm">
+                    {selectedMember.phone && (
+                      <div>
+                        <span className="text-neutral-600">Contact #:</span>{' '}
+                        <span className="text-neutral-900">{selectedMember.phone}</span>
+                      </div>
+                    )}
                     {selectedMember.email && (
                       <div>
                         <span className="text-neutral-600">Email:</span>{' '}
                         <span className="text-neutral-900">{selectedMember.email}</span>
                       </div>
                     )}
-                    {selectedMember.phone && (
-                      <div>
-                        <span className="text-neutral-600">Phone:</span>{' '}
-                        <span className="text-neutral-900">{selectedMember.phone}</span>
-                      </div>
-                    )}
-                    {selectedMember.telegramHandle && (
-                      <div>
-                        <span className="text-neutral-600">Telegram:</span>{' '}
-                        <span className="text-neutral-900">{selectedMember.telegramHandle}</span>
-                      </div>
-                    )}
                   </CardContent>
                 </Card>
 
-                {/* Attributes */}
+                {/* Demographics */}
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Attributes</CardTitle>
+                    <CardTitle className="text-base">Demographics</CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline">{selectedMember.ageGroup}</Badge>
-                      <Badge variant={selectedMember.experience === 'Experienced' ? 'default' : 'secondary'}>
-                        {selectedMember.experience}
+                  <CardContent className="space-y-2 text-sm">
+                    {selectedMember.dateOfBirth && (
+                      <div className="flex justify-between">
+                        <span className="text-neutral-600">Date of Birth:</span>
+                        <span>{new Date(selectedMember.dateOfBirth).toLocaleDateString()}</span>
+                      </div>
+                    )}
+                    {selectedMember.age !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-neutral-600">Age:</span>
+                        <span>{selectedMember.age}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-neutral-600">Status:</span>
+                      <Badge variant={selectedMember.status === 'Active' ? 'default' : 'secondary'}
+                        className={selectedMember.status === 'Active' ? 'bg-green-100 text-green-800 hover:bg-green-100' : ''}>
+                        {selectedMember.status}
                       </Badge>
-                      {selectedMember.languageGroup && (
-                        <Badge variant="outline">{selectedMember.languageGroup}</Badge>
-                      )}
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-neutral-600">Appearance:</span>
+                      <Badge variant="outline" className={
+                        selectedMember.appearance === 'Excellent' ? 'border-green-300 text-green-700' :
+                        selectedMember.appearance === 'Good' ? 'border-blue-300 text-blue-700' :
+                        'border-amber-300 text-amber-700'
+                      }>{selectedMember.appearance}</Badge>
+                    </div>
+                    {selectedMember.language && (
+                      <div className="flex justify-between">
+                        <span className="text-neutral-600">Language:</span>
+                        <span>{selectedMember.language}</span>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
-                {/* Limits & Activity */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Activity & Limits</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-neutral-600">Weekly reservations:</span>
-                      <span className="font-medium">
-                        {selectedMember.weeklyReservations} / {selectedMember.weeklyLimit}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-neutral-600">Monthly reservations:</span>
-                      <span className="font-medium">
-                        {selectedMember.monthlyReservations} / {selectedMember.monthlyLimit}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-neutral-600">Available slots (month):</span>
-                      <span className="font-medium text-green-600">
-                        {selectedMember.monthlyLimit - selectedMember.monthlyReservations}
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Preferences */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Preferences</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <p className="text-sm font-medium text-neutral-700 mb-2">Preferred Days</p>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedMember.preferredDays.map((day) => (
-                          <Badge key={day} variant="secondary">{day}</Badge>
+                {/* Availability */}
+                {selectedMember.availability && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Weekly Availability</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2 text-sm">
+                        {(['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const).map((day) => (
+                          <div key={day} className="flex justify-between items-center">
+                            <span className="text-neutral-600 capitalize w-20">{day}</span>
+                            <Badge variant="outline" className={
+                              selectedMember.availability[day] === 'NA' ? 'text-neutral-400' : 'text-blue-700 border-blue-300'
+                            }>
+                              {selectedMember.availability[day]}
+                            </Badge>
+                          </div>
                         ))}
+                        <div className="border-t pt-2 mt-2 space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-neutral-600">Saturday (days/month):</span>
+                            <span className="font-medium">{selectedMember.availability.saturdayDays}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-neutral-600">Sunday (days/month):</span>
+                            <span className="font-medium">{selectedMember.availability.sundayDays}</span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-neutral-700 mb-2">Preferred Times</p>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedMember.preferredTimes.map((time) => (
-                          <Badge key={time} variant="secondary">{time}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-neutral-700 mb-2">Preferred Locations</p>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedMember.preferredLocations.map((locId) => (
-                          <Badge key={locId} variant="secondary">{getLocationName(locId)}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Shifts */}
                 <Card>
@@ -598,7 +549,7 @@ export default function Members() {
 
       {/* Add/Edit Member Dialog */}
       <Dialog open={formDialogOpen} onOpenChange={setFormDialogOpen}>
-        <DialogContent className="w-full sm:max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingMember ? 'Edit Member' : 'Add New Member'}</DialogTitle>
             <DialogDescription>
@@ -608,6 +559,7 @@ export default function Members() {
             </DialogDescription>
           </DialogHeader>
           <MemberForm
+            key={editingMember?.id || 'new'}
             member={editingMember || undefined}
             onSuccess={() => setFormDialogOpen(false)}
             onCancel={() => setFormDialogOpen(false)}

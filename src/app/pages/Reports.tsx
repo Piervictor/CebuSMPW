@@ -12,20 +12,15 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui/table';
-import {
-  shifts,
-  locations,
-  members,
-  congregations,
-  getCongregationName,
-  getLocationById,
-  getMemberById,
-} from '../data/mockData';
+import { useAppContext } from '../hooks/useAppContext';
 import { Download, FileText, Calendar, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { toast } from 'sonner';
 
 export default function Reports() {
+  const { shifts, locations, members, congregations } = useAppContext();
+  const getCongregationName = (id: string) => congregations.find((c) => c.id === id)?.name || 'Unknown';
+
   const [dateRange, setDateRange] = useState('month');
 
   // Calculate location statistics
@@ -60,12 +55,12 @@ export default function Reports() {
     return {
       id: congregation.id,
       name: congregation.name,
-      city: congregation.city,
+      city: congregation.city || '',
       totalShifts,
       activeMembers,
       avgShiftsPerPublisher,
-      publisherCount: congregation.publisherCount,
-      participationRate: Math.round((activeMembers / congregation.publisherCount) * 100),
+      publisherCount: congregation.publisherCount || 0,
+      participationRate: (congregation.publisherCount || 0) > 0 ? Math.round((activeMembers / (congregation.publisherCount || 1)) * 100) : 0,
     };
   });
 

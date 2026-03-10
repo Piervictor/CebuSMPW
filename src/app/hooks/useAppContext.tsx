@@ -1,17 +1,23 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import {
+  Circuit,
   Congregation,
   Location,
   Member,
   Shift,
+  Timeslot,
   User,
   UserRole,
-  congregations as initialCongregations,
-  locations as initialLocations,
-  members as initialMembers,
   shifts as initialShifts,
   currentUser as initialCurrentUser,
 } from '../data/mockData';
+import {
+  supabaseCircuitService,
+  supabaseCongregationService,
+  supabaseLocationService,
+  supabaseMemberService,
+  supabaseTimeslotService,
+} from '../../lib/supabaseService';
 
 /**
  * Main App Context Interface
@@ -21,10 +27,12 @@ import {
 interface AppContextType {
   // ============ STATE ============
   currentUser: User | null;
+  circuits: Circuit[];
   congregations: Congregation[];
   locations: Location[];
   members: Member[];
   shifts: Shift[];
+  timeslots: Timeslot[];
   isLoading: boolean;
   error: string | null;
 
@@ -41,6 +49,11 @@ interface AppContextType {
   getShiftsByLocation: (locationId: string) => Shift[];
   validateShiftAssignment: (shiftId: string, memberId: string) => { valid: boolean; reason?: string };
 
+  // ============ TIMESLOTS ============
+  createTimeslot: (timeslot: Omit<Timeslot, 'id'>) => Promise<Timeslot>;
+  updateTimeslot: (timeslotId: string, updates: Partial<Timeslot>) => Promise<void>;
+  deleteTimeslot: (timeslotId: string) => Promise<void>;
+
   // ============ MEMBERS ============
   createMember: (member: Omit<Member, 'id'>) => Promise<Member>;
   updateMember: (memberId: string, updates: Partial<Member>) => Promise<void>;
@@ -53,6 +66,12 @@ interface AppContextType {
   updateLocation: (locationId: string, updates: Partial<Location>) => Promise<void>;
   deleteLocation: (locationId: string) => Promise<void>;
   getLocationById: (locationId: string) => Location | undefined;
+
+  // ============ CIRCUITS ============
+  createCircuit: (circuit: Omit<Circuit, 'id'>) => Promise<Circuit>;
+  updateCircuit: (circuitId: string, updates: Partial<Circuit>) => Promise<void>;
+  deleteCircuit: (circuitId: string) => Promise<void>;
+  getCircuitById: (circuitId: string) => Circuit | undefined;
 
   // ============ CONGREGATIONS ============
   createCongregation: (congregation: Omit<Congregation, 'id'>) => Promise<Congregation>;
@@ -77,12 +96,47 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // ============ STATE INITIALIZATION ============
   const [currentUser, setCurrentUserState] = useState<User | null>(initialCurrentUser);
-  const [congregations, setCongregations] = useState<Congregation[]>(initialCongregations);
-  const [locations, setLocations] = useState<Location[]>(initialLocations);
-  const [members, setMembers] = useState<Member[]>(initialMembers);
+  const [circuits, setCircuits] = useState<Circuit[]>([]);
+  const [congregations, setCongregations] = useState<Congregation[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [shifts, setShifts] = useState<Shift[]>(initialShifts);
+  const [timeslots, setTimeslots] = useState<Timeslot[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
+
+  // ============ LOAD FROM SUPABASE ON MOUNT ============
+  useEffect(() => {
+    let cancelled = false;
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        const [circuitsData, congregationsData, locationsData, membersData, timeslotsData] = await Promise.all([
+          supabaseCircuitService.getAll(),
+          supabaseCongregationService.getAll(),
+          supabaseLocationService.getAll(),
+          supabaseMemberService.getAll(),
+          supabaseTimeslotService.getAll(),
+        ]);
+        if (!cancelled) {
+          setCircuits(circuitsData);
+          setCongregations(congregationsData);
+          setLocations(locationsData);
+          setMembers(membersData);
+          setTimeslots(timeslotsData);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to load data from Supabase:', err);
+          setErrorState(err instanceof Error ? err.message : 'Failed to load data');
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+    loadData();
+    return () => { cancelled = true; };
+  }, []);
 
   // ============ ERROR MANAGEMENT ============
   const setError = useCallback((errorMsg: string | null) => {
@@ -387,6 +441,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [shifts]
   );
 
+  // ============ TIMESLOT OPERATIONS ============
+  const createTimeslot = useCallback(
+    async (newTimeslot: Omit<Timeslot, 'id'>) => {
+      setIsLoading(true);
+      try {
+        const timeslot = await supabaseTimeslotService.create(newTimeslot);
+        setTimeslots((prev) => [...prev, timeslot]);
+        clearError();
+        return timeslot;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to create timeslot';
+        setError(errorMsg);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [setError, clearError]
+  );
+
+  const updateTimeslot = useCallback(
+    async (timeslotId: string, updates: Partial<Timeslot>) => {
+      setIsLoading(true);
+      try {
+        const updated = await supabaseTimeslotService.update(timeslotId, updates);
+        setTimeslots((prev) =>
+          prev.map((t) => (t.id === timeslotId ? updated : t))
+        );
+        clearError();
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to update timeslot';
+        setError(errorMsg);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [setError, clearError]
+  );
+
+  const deleteTimeslot = useCallback(
+    async (timeslotId: string) => {
+      setIsLoading(true);
+      try {
+        await supabaseTimeslotService.delete(timeslotId);
+        setTimeslots((prev) => prev.filter((t) => t.id !== timeslotId));
+        clearError();
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to delete timeslot';
+        setError(errorMsg);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [setError, clearError]
+  );
+
   // ============ MEMBER OPERATIONS ============
   /**
    * Create a new member
@@ -395,14 +507,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (newMember: Omit<Member, 'id'>) => {
       setIsLoading(true);
       try {
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        const member: Member = {
-          ...newMember,
-          id: `mem-${Date.now()}`,
-        };
-
+        const member = await supabaseMemberService.create(newMember);
         setMembers((prev) => [...prev, member]);
         clearError();
         return member;
@@ -424,20 +529,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (memberId: string, updates: Partial<Member>) => {
       setIsLoading(true);
       try {
-        // Validate member exists
-        if (!members.find((m) => m.id === memberId)) {
-          throw new Error('Member not found');
-        }
-
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
+        const updated = await supabaseMemberService.update(memberId, updates);
         setMembers((prev) =>
           prev.map((member) =>
-            member.id === memberId ? { ...member, ...updates } : member
+            member.id === memberId ? updated : member
           )
         );
-
         clearError();
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Failed to update member';
@@ -447,7 +544,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoading(false);
       }
     },
-    [setError, clearError, members]
+    [setError, clearError]
   );
 
   /**
@@ -458,18 +555,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (memberId: string) => {
       setIsLoading(true);
       try {
-        // Validate member exists
-        if (!members.find((m) => m.id === memberId)) {
-          throw new Error('Member not found');
-        }
-
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        // Delete member
+        await supabaseMemberService.delete(memberId);
         setMembers((prev) => prev.filter((member) => member.id !== memberId));
 
-        // Remove from all shifts
+        // Remove from all local shifts
         setShifts((prev) =>
           prev.map((shift) => ({
             ...shift,
@@ -486,7 +575,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoading(false);
       }
     },
-    [setError, clearError, members]
+    [setError, clearError]
   );
 
   /**
@@ -512,16 +601,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    */
   const createLocation = useCallback(
     async (newLocation: Omit<Location, 'id'>) => {
+      clearError();
       setIsLoading(true);
       try {
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        if (!circuits.find((c) => c.id === newLocation.circuitId)) {
+          throw new Error('Circuit not found');
+        }
 
-        const location: Location = {
-          ...newLocation,
-          id: `loc-${Date.now()}`,
-        };
+        const invalidCongregation = newLocation.linkedCongregations.find((congregationId) => {
+          const congregation = congregations.find((c) => c.id === congregationId);
+          return !congregation || congregation.circuitId !== newLocation.circuitId;
+        });
 
+        if (invalidCongregation) {
+          throw new Error('Linked congregations must belong to the selected circuit');
+        }
+
+        const location = await supabaseLocationService.create(newLocation);
         setLocations((prev) => [...prev, location]);
         clearError();
         return location;
@@ -533,7 +629,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoading(false);
       }
     },
-    [setError, clearError]
+    [circuits, congregations, setError, clearError]
   );
 
   /**
@@ -541,22 +637,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    */
   const updateLocation = useCallback(
     async (locationId: string, updates: Partial<Location>) => {
+      clearError();
       setIsLoading(true);
       try {
-        // Validate location exists
-        if (!locations.find((l) => l.id === locationId)) {
+        const existingLocation = locations.find((l) => l.id === locationId);
+        if (!existingLocation) {
           throw new Error('Location not found');
         }
 
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        const resolvedCircuitId = updates.circuitId ?? existingLocation.circuitId;
+        if (resolvedCircuitId && !circuits.find((c) => c.id === resolvedCircuitId)) {
+          throw new Error('Circuit not found');
+        }
 
+        if (updates.linkedCongregations && resolvedCircuitId) {
+          const invalidCongregation = updates.linkedCongregations.find((congregationId) => {
+            const congregation = congregations.find((c) => c.id === congregationId);
+            return !congregation || congregation.circuitId !== resolvedCircuitId;
+          });
+
+          if (invalidCongregation) {
+            throw new Error('Linked congregations must belong to the selected circuit');
+          }
+        }
+
+        const updated = await supabaseLocationService.update(locationId, updates);
         setLocations((prev) =>
-          prev.map((location) =>
-            location.id === locationId ? { ...location, ...updates } : location
-          )
+          prev.map((location) => (location.id === locationId ? updated : location))
         );
-
         clearError();
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Failed to update location';
@@ -566,7 +674,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoading(false);
       }
     },
-    [setError, clearError, locations]
+    [circuits, congregations, setError, clearError, locations]
   );
 
   /**
@@ -575,14 +683,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    */
   const deleteLocation = useCallback(
     async (locationId: string) => {
+      clearError();
       setIsLoading(true);
       try {
-        // Validate location exists
-        if (!locations.find((l) => l.id === locationId)) {
-          throw new Error('Location not found');
-        }
-
-        // Check for future shifts
         const today = new Date().toISOString().split('T')[0];
         const futureShifts = shifts.filter(
           (s) => s.locationId === locationId && s.date >= today
@@ -592,13 +695,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           throw new Error('Cannot delete location with future shifts assigned');
         }
 
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
+        await supabaseLocationService.delete(locationId);
         setLocations((prev) =>
           prev.filter((location) => location.id !== locationId)
         );
-
         clearError();
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Failed to delete location';
@@ -619,22 +719,100 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [locations]
   );
 
+  // ============ CIRCUIT OPERATIONS ============
+  const createCircuit = useCallback(
+    async (newCircuit: Omit<Circuit, 'id'>) => {
+      clearError();
+      setIsLoading(true);
+      try {
+        const circuit = await supabaseCircuitService.create(newCircuit);
+        setCircuits((prev) => [...prev, circuit]);
+        clearError();
+        return circuit;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to create circuit';
+        setError(errorMsg);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [setError, clearError]
+  );
+
+  const updateCircuit = useCallback(
+    async (circuitId: string, updates: Partial<Circuit>) => {
+      clearError();
+      setIsLoading(true);
+      try {
+        const updated = await supabaseCircuitService.update(circuitId, updates);
+        setCircuits((prev) =>
+          prev.map((circuit) => (circuit.id === circuitId ? updated : circuit))
+        );
+        clearError();
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to update circuit';
+        setError(errorMsg);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [setError, clearError]
+  );
+
+  const deleteCircuit = useCallback(
+    async (circuitId: string) => {
+      clearError();
+      setIsLoading(true);
+      try {
+        const dependentCongregations = congregations.filter((c) => c.circuitId === circuitId);
+        if (dependentCongregations.length > 0) {
+          throw new Error(
+            `Cannot delete circuit with ${dependentCongregations.length} congregation(s) assigned`
+          );
+        }
+
+        const dependentLocations = locations.filter((location) => location.circuitId === circuitId);
+        if (dependentLocations.length > 0) {
+          throw new Error(
+            `Cannot delete circuit with ${dependentLocations.length} location(s) assigned`
+          );
+        }
+
+        await supabaseCircuitService.delete(circuitId);
+        setCircuits((prev) => prev.filter((circuit) => circuit.id !== circuitId));
+        clearError();
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to delete circuit';
+        setError(errorMsg);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [congregations, locations, setError, clearError]
+  );
+
+  const getCircuitById = useCallback(
+    (circuitId: string) => circuits.find((circuit) => circuit.id === circuitId),
+    [circuits]
+  );
+
   // ============ CONGREGATION OPERATIONS ============
   /**
    * Create a new congregation
    */
   const createCongregation = useCallback(
     async (newCongregation: Omit<Congregation, 'id'>) => {
+      clearError();
       setIsLoading(true);
       try {
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        if (!circuits.find((c) => c.id === newCongregation.circuitId)) {
+          throw new Error('Circuit not found');
+        }
 
-        const congregation: Congregation = {
-          ...newCongregation,
-          id: `cong-${Date.now()}`,
-        };
-
+        const congregation = await supabaseCongregationService.create(newCongregation);
         setCongregations((prev) => [...prev, congregation]);
         clearError();
         return congregation;
@@ -646,7 +824,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoading(false);
       }
     },
-    [setError, clearError]
+    [circuits, setError, clearError]
   );
 
   /**
@@ -654,24 +832,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    */
   const updateCongregation = useCallback(
     async (congregationId: string, updates: Partial<Congregation>) => {
+      clearError();
       setIsLoading(true);
       try {
-        // Validate congregation exists
-        if (!congregations.find((c) => c.id === congregationId)) {
-          throw new Error('Congregation not found');
+        if (updates.circuitId && !circuits.find((c) => c.id === updates.circuitId)) {
+          throw new Error('Circuit not found');
         }
 
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
+        const updated = await supabaseCongregationService.update(congregationId, updates);
         setCongregations((prev) =>
           prev.map((congregation) =>
-            congregation.id === congregationId
-              ? { ...congregation, ...updates }
-              : congregation
+            congregation.id === congregationId ? updated : congregation
           )
         );
-
         clearError();
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Failed to update congregation';
@@ -681,7 +854,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoading(false);
       }
     },
-    [setError, clearError, congregations]
+    [circuits, setError, clearError]
   );
 
   /**
@@ -690,13 +863,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    */
   const deleteCongregation = useCallback(
     async (congregationId: string) => {
+      clearError();
       setIsLoading(true);
       try {
-        // Validate congregation exists
-        if (!congregations.find((c) => c.id === congregationId)) {
-          throw new Error('Congregation not found');
-        }
-
         // Check for dependent members
         const dependentMembers = members.filter(
           (m) => m.congregationId === congregationId
@@ -707,13 +876,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           );
         }
 
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // Check for locations that link this congregation
+        const linkedLocations = locations.filter(
+          (l) => l.linkedCongregations.includes(congregationId)
+        );
+        if (linkedLocations.length > 0) {
+          throw new Error(
+            `Cannot delete congregation linked to ${linkedLocations.length} location(s)`
+          );
+        }
 
+        await supabaseCongregationService.delete(congregationId);
         setCongregations((prev) =>
           prev.filter((congregation) => congregation.id !== congregationId)
         );
-
         clearError();
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Failed to delete congregation';
@@ -723,7 +899,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoading(false);
       }
     },
-    [setError, clearError, congregations, members]
+    [setError, clearError, members, locations]
   );
 
   /**
@@ -736,21 +912,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ============ DATA MANAGEMENT ============
   /**
-   * Refetch all data from server
-   * In real app, this would call API endpoints
+   * Refetch all data from Supabase
    */
   const refetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Simulate API delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // In a real app:
-      // setCongregations(await api.get('/congregations'))
-      // setLocations(await api.get('/locations'))
-      // setMembers(await api.get('/members'))
-      // setShifts(await api.get('/shifts'))
-
+      const [circuitsData, congregationsData, locationsData, timeslotsData] = await Promise.all([
+        supabaseCircuitService.getAll(),
+        supabaseCongregationService.getAll(),
+        supabaseLocationService.getAll(),
+        supabaseTimeslotService.getAll(),
+      ]);
+      setCircuits(circuitsData);
+      setCongregations(congregationsData);
+      setLocations(locationsData);
+      setTimeslots(timeslotsData);
       clearError();
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to fetch data';
@@ -764,10 +940,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const value: AppContextType = {
     // State
     currentUser,
+    circuits,
     congregations,
     locations,
     members,
     shifts,
+    timeslots,
     isLoading,
     error,
 
@@ -784,6 +962,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     getShiftsByLocation,
     validateShiftAssignment,
 
+    // Timeslots
+    createTimeslot,
+    updateTimeslot,
+    deleteTimeslot,
+
     // Members
     createMember,
     updateMember,
@@ -796,6 +979,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updateLocation,
     deleteLocation,
     getLocationById,
+
+    // Circuits
+    createCircuit,
+    updateCircuit,
+    deleteCircuit,
+    getCircuitById,
 
     // Congregations
     createCongregation,
