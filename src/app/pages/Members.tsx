@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -51,6 +52,16 @@ export default function Members() {
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [memberToDelete, setMemberToDelete] = useState<Member | null>(null);
+
+  // Quick Actions: auto-open create dialog when navigated with ?new=member
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('new') === 'member') {
+      setSearchParams({}, { replace: true });
+      handleAddMember();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep selectedMember in sync when members array updates (e.g. after edit/create)
   useEffect(() => {

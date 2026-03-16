@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { toLocalDateStr } from '../../lib/dateUtils';
 import {
   Circuit,
   Congregation,
@@ -8,7 +9,6 @@ import {
   Timeslot,
   User,
   UserRole,
-  shifts as initialShifts,
   currentUser as initialCurrentUser,
 } from '../data/mockData';
 import {
@@ -17,6 +17,7 @@ import {
   supabaseLocationService,
   supabaseMemberService,
   supabaseTimeslotService,
+  supabaseShiftService,
 } from '../../lib/supabaseService';
 
 /**
@@ -48,6 +49,7 @@ interface AppContextType {
   getShiftsByMember: (memberId: string) => Shift[];
   getShiftsByLocation: (locationId: string) => Shift[];
   validateShiftAssignment: (shiftId: string, memberId: string) => { valid: boolean; reason?: string };
+  loadShiftsForWeek: (locationId: string, weekStartDate: string) => Promise<Shift[]>;
 
   // ============ TIMESLOTS ============
   createTimeslot: (timeslot: Omit<Timeslot, 'id'>) => Promise<Timeslot>;
@@ -100,7 +102,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [congregations, setCongregations] = useState<Congregation[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>(initialShifts);
+  const [shifts, setShifts] = useState<Shift[]>([]);
   const [timeslots, setTimeslots] = useState<Timeslot[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
@@ -111,12 +113,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const loadData = async () => {
       setIsLoading(true);
       try {
-        const [circuitsData, congregationsData, locationsData, membersData, timeslotsData] = await Promise.all([
+        const [circuitsData, congregationsData, locationsData, membersData, timeslotsData, shiftsData] = await Promise.all([
           supabaseCircuitService.getAll(),
           supabaseCongregationService.getAll(),
           supabaseLocationService.getAll(),
           supabaseMemberService.getAll(),
           supabaseTimeslotService.getAll(),
+          supabaseShiftService.getAll().catch(() => [] as Shift[]),
         ]);
         if (!cancelled) {
           setCircuits(circuitsData);
@@ -124,6 +127,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setLocations(locationsData);
           setMembers(membersData);
           setTimeslots(timeslotsData);
+          setShifts(shiftsData);
         }
       } catch (err) {
         if (!cancelled) {
@@ -299,41 +303,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           throw new Error(validation.reason || 'Assignment validation failed');
         }
 
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // Persist to Supabase
+        const updatedShift = await supabaseShiftService.assignMember(shiftId, memberId, 'admin');
 
-        // Update shifts state
+        // Update local state with the DB result
         setShifts((prev) =>
-          prev.map((shift) =>
-            shift.id === shiftId
-              ? {
-                  ...shift,
-                  assignedMembers: [...shift.assignedMembers, memberId],
-                  status:
-                    shift.assignedMembers.length + 1 >= shift.requiredCount
-                      ? 'filled'
-                      : 'partial',
-                  assignedBy: 'admin',
-                }
-              : shift
-          )
+          prev.map((s) => (s.id === shiftId ? updatedShift : s))
         );
 
-        // Update member shift count
-        const shift = shifts.find((s) => s.id === shiftId);
-        if (shift) {
-          setMembers((prev) =>
-            prev.map((member) =>
-              member.id === memberId
-                ? {
-                    ...member,
-                    monthlyReservations: member.monthlyReservations + 1,
-                    weeklyReservations: member.weeklyReservations + 1,
-                  }
-                : member
-            )
-          );
-        }
+        // Update member reservation counts locally
+        setMembers((prev) =>
+          prev.map((member) =>
+            member.id === memberId
+              ? {
+                  ...member,
+                  monthlyReservations: member.monthlyReservations + 1,
+                  weeklyReservations: member.weeklyReservations + 1,
+                }
+              : member
+          )
+        );
 
         clearError();
       } catch (err) {
@@ -344,7 +333,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsLoading(false);
       }
     },
-    [validateShiftAssignment, setError, clearError, shifts]
+    [validateShiftAssignment, setError, clearError]
   );
 
   /**
@@ -354,26 +343,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (shiftId: string, memberId: string) => {
       setIsLoading(true);
       try {
-        // Simulate API delay
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // Persist to Supabase
+        const updatedShift = await supabaseShiftService.removeMember(shiftId, memberId);
 
+        // Update local state with DB result
         setShifts((prev) =>
-          prev.map((shift) => {
-            if (shift.id === shiftId) {
-              const newAssigned = shift.assignedMembers.filter((id) => id !== memberId);
-              return {
-                ...shift,
-                assignedMembers: newAssigned,
-                status:
-                  newAssigned.length === 0
-                    ? 'open'
-                    : newAssigned.length < shift.requiredCount
-                      ? 'partial'
-                      : 'filled',
-              };
-            }
-            return shift;
-          })
+          prev.map((s) => (s.id === shiftId ? updatedShift : s))
         );
 
         clearError();
@@ -439,6 +414,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getShiftsByLocation = useCallback(
     (locationId: string) => shifts.filter((s) => s.locationId === locationId),
     [shifts]
+  );
+
+  /**
+   * Load (or generate) shifts for a specific location + week from timeslots.
+   * Calls the DB to create missing shift rows, then merges into local state.
+   */
+  const loadShiftsForWeek = useCallback(
+    async (locationId: string, weekStartDate: string): Promise<Shift[]> => {
+      try {
+        const weekShifts = await supabaseShiftService.generateWeekShifts(locationId, weekStartDate);
+        // Merge into local state: replace existing shifts for this location+week, keep the rest
+        const weekEnd = new Date(weekStartDate + 'T00:00:00');
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const weekEndStr = toLocalDateStr(weekEnd);
+
+        setShifts((prev) => {
+          // Remove old shifts for this location+week range
+          const remaining = prev.filter(
+            (s) =>
+              !(s.locationId === locationId && s.date >= weekStartDate && s.date <= weekEndStr)
+          );
+          return [...remaining, ...weekShifts];
+        });
+        return weekShifts;
+      } catch (err) {
+        console.error('Failed to load shifts for week:', err);
+        return [];
+      }
+    },
+    []
   );
 
   // ============ TIMESLOT OPERATIONS ============
@@ -686,7 +691,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       clearError();
       setIsLoading(true);
       try {
-        const today = new Date().toISOString().split('T')[0];
+        const today = toLocalDateStr(new Date());
         const futureShifts = shifts.filter(
           (s) => s.locationId === locationId && s.date >= today
         );
@@ -917,16 +922,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [circuitsData, congregationsData, locationsData, timeslotsData] = await Promise.all([
+      const [circuitsData, congregationsData, locationsData, timeslotsData, shiftsData] = await Promise.all([
         supabaseCircuitService.getAll(),
         supabaseCongregationService.getAll(),
         supabaseLocationService.getAll(),
         supabaseTimeslotService.getAll(),
+        supabaseShiftService.getAll().catch(() => [] as Shift[]),
       ]);
       setCircuits(circuitsData);
       setCongregations(congregationsData);
       setLocations(locationsData);
       setTimeslots(timeslotsData);
+      setShifts(shiftsData);
       clearError();
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to fetch data';
@@ -961,6 +968,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     getShiftsByMember,
     getShiftsByLocation,
     validateShiftAssignment,
+    loadShiftsForWeek,
 
     // Timeslots
     createTimeslot,

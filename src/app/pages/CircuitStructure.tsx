@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -11,12 +12,28 @@ import {
 } from '../components/ui/dialog';
 import { useAppContext } from '../hooks/useAppContext';
 import { CircuitForm } from '../components/forms/CircuitForm';
+import { CongregationForm } from '../components/forms/CongregationForm';
 import { Building2, MapPin, Network, Plus, Users } from 'lucide-react';
 
 export default function CircuitStructure() {
   const { circuits, congregations, locations, members } = useAppContext();
   const [selectedCircuitId, setSelectedCircuitId] = useState<string>(circuits[0]?.id || '');
   const [formDialogOpen, setFormDialogOpen] = useState(false);
+  const [congDialogOpen, setCongDialogOpen] = useState(false);
+
+  // Quick Actions: auto-open dialogs via URL params
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const action = searchParams.get('new');
+    if (action === 'circuit') {
+      setSearchParams({}, { replace: true });
+      setFormDialogOpen(true);
+    } else if (action === 'congregation') {
+      setSearchParams({}, { replace: true });
+      setCongDialogOpen(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!selectedCircuitId && circuits[0]) {
@@ -264,6 +281,30 @@ export default function CircuitStructure() {
             onSuccess={() => setFormDialogOpen(false)}
             onCancel={() => setFormDialogOpen(false)}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={congDialogOpen} onOpenChange={setCongDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add Congregation</DialogTitle>
+            <DialogDescription>
+              {selectedCircuitId
+                ? 'Create a new congregation under the selected circuit.'
+                : 'No circuit selected. Please create a circuit first.'}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedCircuitId ? (
+            <CongregationForm
+              circuitId={selectedCircuitId}
+              onSuccess={() => setCongDialogOpen(false)}
+              onCancel={() => setCongDialogOpen(false)}
+            />
+          ) : (
+            <p className="text-sm text-center py-4" style={{ color: '#6B7280' }}>
+              Add a circuit first before creating a congregation.
+            </p>
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -4,8 +4,9 @@
  */
 
 import { supabase } from './supabase';
+import { toLocalDateStr } from './dateUtils';
 import type {
-  Circuit, Congregation, Location, Member, MemberAvailability, Timeslot, DayOfWeek,
+  Circuit, Congregation, Location, Member, MemberAvailability, Shift, Timeslot, DayOfWeek,
   LocationCategory, AgeGroup, ExperienceLevel,
   WeekdayAvailability, MemberStatus, MemberAppearance,
 } from '../app/data/mockData';
@@ -588,5 +589,239 @@ export const supabaseTimeslotService = {
   async delete(id: string): Promise<void> {
     const { error } = await supabase.from('timeslots').delete().eq('id', id);
     if (error) throw new Error(error.message);
+  },
+};
+
+// ─── Shift Service ──────────────────────────────────────────
+
+interface ShiftRow {
+  id: string;
+  timeslot_id: string | null;
+  location_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  required_count: number;
+  status: string;
+}
+
+interface ShiftAssignmentRow {
+  id: string;
+  shift_id: string;
+  member_id: string;
+  assigned_by: string;
+  assigned_at: string;
+}
+
+/**
+ * Convert a shift row + its assignment rows into the app's Shift interface.
+ * This keeps compatibility with all existing UI and context code.
+ */
+function toShift(
+  row: ShiftRow & { shift_assignments?: ShiftAssignmentRow[] | null },
+): Shift {
+  const assignments = Array.isArray(row.shift_assignments) ? row.shift_assignments : [];
+  const assignedMembers = assignments.map((a) => a.member_id);
+  const lastAssignedBy = assignments.length > 0 ? assignments[assignments.length - 1].assigned_by : undefined;
+  return {
+    id: row.id,
+    locationId: row.location_id,
+    date: row.date,
+    startTime: row.start_time?.slice(0, 5) || '',
+    endTime: row.end_time?.slice(0, 5) || '',
+    requiredCount: row.required_count,
+    assignedMembers,
+    assignedBy: (lastAssignedBy as Shift['assignedBy']) || undefined,
+    status: row.status as Shift['status'],
+  };
+}
+
+export const supabaseShiftService = {
+  /**
+   * Get shifts for a date range (with their assignments joined).
+   */
+  async getByDateRange(startDate: string, endDate: string): Promise<Shift[]> {
+    const { data, error } = await supabase
+      .from('shifts')
+      .select('*, shift_assignments(*)')
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .order('date')
+      .order('start_time');
+    if (error) { console.error('Supabase shifts.getByDateRange error:', error); throw new Error(error.message); }
+    return (data as (ShiftRow & { shift_assignments: ShiftAssignmentRow[] })[]).map(toShift);
+  },
+
+  /**
+   * Get all shifts (with assignments) — used on initial load.
+   * Fetches from today minus 7 days to today plus 30 days.
+   */
+  async getAll(): Promise<Shift[]> {
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(start.getDate() - 7);
+    const end = new Date(today);
+    end.setDate(end.getDate() + 30);
+    return this.getByDateRange(
+      toLocalDateStr(start),
+      toLocalDateStr(end),
+    );
+  },
+
+  /**
+   * Generate shifts for a specific location + week from its timeslots.
+   * Uses INSERT ... ON CONFLICT DO NOTHING to avoid duplicates.
+   * Returns all shifts for that location + week (including pre-existing ones).
+   */
+  async generateWeekShifts(locationId: string, weekStartDate: string): Promise<Shift[]> {
+    // 1. Fetch active timeslots for this location
+    const { data: tsData, error: tsError } = await supabase
+      .from('timeslots')
+      .select('*')
+      .eq('location_id', locationId)
+      .eq('active', true);
+    if (tsError) throw new Error(tsError.message);
+    const timeslotRows = tsData as TimeslotRow[];
+
+    if (timeslotRows.length === 0) return [];
+
+    // 2. Build 7 days of the week
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const weekStart = new Date(weekStartDate + 'T00:00:00');
+    const rows: {
+      timeslot_id: string;
+      location_id: string;
+      date: string;
+      start_time: string;
+      end_time: string;
+      required_count: number;
+      status: string;
+    }[] = [];
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart);
+      d.setDate(weekStart.getDate() + i);
+      const dateStr = toLocalDateStr(d);
+      const dayName = dayNames[d.getDay()];
+
+      // Find timeslots that match this day of week
+      for (const ts of timeslotRows) {
+        if (ts.day_of_week === dayName) {
+          rows.push({
+            timeslot_id: ts.id,
+            location_id: locationId,
+            date: dateStr,
+            start_time: ts.start_time,
+            end_time: ts.end_time,
+            required_count: ts.required_publishers,
+            status: 'open',
+          });
+        }
+      }
+    }
+
+    if (rows.length > 0) {
+      // Insert, ignoring conflicts (shifts already exist for that slot)
+      const { error: insertError } = await supabase
+        .from('shifts')
+        .upsert(rows, { onConflict: 'location_id,date,start_time,end_time', ignoreDuplicates: true });
+      if (insertError) {
+        console.error('Supabase shifts.generateWeek insert error:', insertError);
+        // Non-fatal: shifts may already exist
+      }
+    }
+
+    // 3. Return all shifts for this location + week
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    const { data, error } = await supabase
+      .from('shifts')
+      .select('*, shift_assignments(*)')
+      .eq('location_id', locationId)
+      .gte('date', weekStartDate)
+      .lte('date', toLocalDateStr(weekEnd))
+      .order('date')
+      .order('start_time');
+    if (error) throw new Error(error.message);
+    return (data as (ShiftRow & { shift_assignments: ShiftAssignmentRow[] })[]).map(toShift);
+  },
+
+  /**
+   * Assign a member to a shift. Creates a shift_assignments row and updates shift status.
+   */
+  async assignMember(
+    shiftId: string,
+    memberId: string,
+    assignedBy: 'admin' | 'self' = 'admin',
+  ): Promise<Shift> {
+    // Insert assignment
+    const { error: assignError } = await supabase
+      .from('shift_assignments')
+      .insert({ shift_id: shiftId, member_id: memberId, assigned_by: assignedBy });
+    if (assignError) {
+      console.error('Supabase shift_assignments.insert error:', assignError);
+      throw new Error(assignError.message);
+    }
+
+    // Recompute status
+    await this.recomputeStatus(shiftId);
+
+    // Return updated shift
+    const { data, error } = await supabase
+      .from('shifts')
+      .select('*, shift_assignments(*)')
+      .eq('id', shiftId)
+      .single();
+    if (error) throw new Error(error.message);
+    return toShift(data as ShiftRow & { shift_assignments: ShiftAssignmentRow[] });
+  },
+
+  /**
+   * Remove a member from a shift.
+   */
+  async removeMember(shiftId: string, memberId: string): Promise<Shift> {
+    const { error: removeError } = await supabase
+      .from('shift_assignments')
+      .delete()
+      .eq('shift_id', shiftId)
+      .eq('member_id', memberId);
+    if (removeError) {
+      console.error('Supabase shift_assignments.delete error:', removeError);
+      throw new Error(removeError.message);
+    }
+
+    await this.recomputeStatus(shiftId);
+
+    const { data, error } = await supabase
+      .from('shifts')
+      .select('*, shift_assignments(*)')
+      .eq('id', shiftId)
+      .single();
+    if (error) throw new Error(error.message);
+    return toShift(data as ShiftRow & { shift_assignments: ShiftAssignmentRow[] });
+  },
+
+  /**
+   * Recompute a shift's status based on assignment count vs required_count.
+   */
+  async recomputeStatus(shiftId: string): Promise<void> {
+    const { data: shift, error: shiftErr } = await supabase
+      .from('shifts')
+      .select('required_count')
+      .eq('id', shiftId)
+      .single();
+    if (shiftErr) return;
+
+    const { count, error: countErr } = await supabase
+      .from('shift_assignments')
+      .select('id', { count: 'exact', head: true })
+      .eq('shift_id', shiftId);
+    if (countErr) return;
+
+    const assignedCount = count || 0;
+    const requiredCount = (shift as { required_count: number }).required_count;
+    const status = assignedCount === 0 ? 'open' : assignedCount >= requiredCount ? 'filled' : 'partial';
+
+    await supabase.from('shifts').update({ status }).eq('id', shiftId);
   },
 };

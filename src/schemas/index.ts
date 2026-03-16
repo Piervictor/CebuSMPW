@@ -299,11 +299,13 @@ export const LocationSchema = z.object({
   category: LocationCategorySchema,
   city: z
     .string()
-    .min(2, 'City must be at least 2 characters')
-    .max(50, 'City name is too long'),
+    .max(50, 'City name is too long')
+    .optional()
+    .default(''),
   linkedCongregations: z
     .array(z.string())
-    .min(1, 'At least one congregation must be linked'),
+    .optional()
+    .default([]),
   active: z
     .boolean()
     .default(true),

@@ -44,6 +44,7 @@ export interface Location {
   ageGroup?: AgeGroup;
   experienceLevel?: ExperienceLevel;
   maxPublishers?: number;
+  multiCircuitSharing?: boolean;
   notes: string;
 }
 
@@ -547,7 +548,10 @@ const generateShifts = (): Shift[] => {
   for (let day = 0; day < 14; day++) {
     const date = new Date(today);
     date.setDate(date.getDate() + day);
-    const dateStr = date.toISOString().split('T')[0];
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${d}`;
 
     // Generate shifts for each active location
     locations

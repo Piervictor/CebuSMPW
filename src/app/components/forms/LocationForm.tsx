@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -18,7 +18,7 @@ import { CreateLocationSchema, UpdateLocationSchema, zodFormResolver } from '../
 import type { LocationFormData, LocationUpdateData } from '../../../schemas';
 import type { Location } from '../../data/mockData';
 import { useAppContext } from '../../hooks/useAppContext';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Users } from 'lucide-react';
 
 interface LocationFormProps {
   location?: Location;
@@ -59,8 +59,11 @@ export function LocationForm({ location, onSuccess, onCancel }: LocationFormProp
           name: location.name,
           category: location.category,
           city: location.city,
-          linkedCongregations: location.linkedCongregations,
+          linkedCongregations: location.linkedCongregations ?? [],
           active: location.active,
+          ageGroup: location.ageGroup ?? 'All ages',
+          experienceLevel: location.experienceLevel ?? 'Any',
+          maxPublishers: location.maxPublishers ?? 3,
           notes: location.notes,
         }
       : {
@@ -77,34 +80,25 @@ export function LocationForm({ location, onSuccess, onCancel }: LocationFormProp
         },
   });
 
-  const selectedCircuitId = watch('circuitId') || '';
-  const selectedCongregations = watch('linkedCongregations') || [];
   const isActive = watch('active') ?? true;
+  const watchedCircuitId = watch('circuitId') ?? '';
+  const watchedLinkedCongregations = (watch('linkedCongregations') ?? []) as string[];
 
-  const availableCongregations = congregations.filter(
-    (congregation) => congregation.circuitId === selectedCircuitId
+  // Congregations belonging to the selected circuit
+  const circuitCongregations = useMemo(
+    () => congregations.filter((c) => c.circuitId === watchedCircuitId),
+    [congregations, watchedCircuitId],
   );
 
+  // When circuit changes, remove linked congregations that no longer belong
   useEffect(() => {
-    if (!selectedCircuitId) {
-      if (selectedCongregations.length > 0) {
-        setValue('linkedCongregations', [], { shouldValidate: true, shouldDirty: true });
-      }
-      return;
+    if (!watchedCircuitId) return;
+    const validIds = new Set(circuitCongregations.map((c) => c.id));
+    const filtered = watchedLinkedCongregations.filter((id) => validIds.has(id));
+    if (filtered.length !== watchedLinkedCongregations.length) {
+      setValue('linkedCongregations', filtered, { shouldDirty: true });
     }
-
-    const validCongregationIds = availableCongregations.map((congregation) => congregation.id);
-    const nextCongregations = selectedCongregations.filter((congregationId) =>
-      validCongregationIds.includes(congregationId)
-    );
-
-    if (nextCongregations.length !== selectedCongregations.length) {
-      setValue('linkedCongregations', nextCongregations, {
-        shouldValidate: true,
-        shouldDirty: true,
-      });
-    }
-  }, [availableCongregations, selectedCircuitId, selectedCongregations, setValue]);
+  }, [watchedCircuitId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onSubmit = async (data: LocationFormData | LocationUpdateData) => {
     setFormError(null);
@@ -112,15 +106,18 @@ export function LocationForm({ location, onSuccess, onCancel }: LocationFormProp
       if (isEditMode && location) {
         const updateData: Partial<Location> = {
           ...data,
+          linkedCongregations: (data as LocationFormData).linkedCongregations ?? location.linkedCongregations ?? [],
           notes: data.notes ?? '',
         };
 
         await updateLocation(location.id, updateData);
         toast.success('Location updated successfully');
       } else {
+        const fd = data as LocationFormData;
         const createData: Omit<Location, 'id'> = {
-          ...(data as LocationFormData),
-          notes: data.notes ?? '',
+          ...fd,
+          linkedCongregations: fd.linkedCongregations ?? [],
+          notes: fd.notes ?? '',
         };
 
         await createLocation(createData);
@@ -186,7 +183,7 @@ export function LocationForm({ location, onSuccess, onCancel }: LocationFormProp
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="city">City *</Label>
+        <Label htmlFor="city">City</Label>
         <Input
           id="city"
           placeholder="e.g., Downtown, North District"
@@ -218,44 +215,103 @@ export function LocationForm({ location, onSuccess, onCancel }: LocationFormProp
         {errors.category && <p className="text-sm text-red-500">{errors.category.message}</p>}
       </div>
 
-      <div className="space-y-3">
-        <Label>Linked Congregations * (same circuit only)</Label>
-        <div className="space-y-2 border border-neutral-200 rounded-lg p-4">
-          {!selectedCircuitId ? (
-            <p className="text-sm text-neutral-500 italic">Select a circuit first</p>
-          ) : availableCongregations.length === 0 ? (
-            <p className="text-sm text-neutral-500 italic">No congregations available in this circuit</p>
-          ) : (
-            availableCongregations.map((congregation) => {
-              const checked = selectedCongregations.includes(congregation.id);
-
+      {/* ── Linked Congregations (multi-select checkboxes) ── */}
+      <div className="space-y-2">
+        <Label className="flex items-center gap-1.5">
+          <Users className="h-4 w-4" />
+          Linked Congregations
+        </Label>
+        <p className="text-xs text-neutral-500 -mt-1">
+          Only members from linked congregations will be available for scheduling at this location.
+        </p>
+        {!watchedCircuitId ? (
+          <p className="text-xs text-amber-600 italic">Select a circuit first to see available congregations.</p>
+        ) : circuitCongregations.length === 0 ? (
+          <p className="text-xs text-amber-600 italic">No congregations found in the selected circuit.</p>
+        ) : (
+          <div className="border rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto bg-white">
+            {circuitCongregations.map((cong) => {
+              const isChecked = watchedLinkedCongregations.includes(cong.id);
               return (
-                <div key={congregation.id} className="flex items-center space-x-2">
+                <div key={cong.id} className="flex items-center space-x-2">
                   <Checkbox
-                    id={`cong-${congregation.id}`}
-                    checked={checked}
-                    onCheckedChange={(nextChecked) => {
-                      const nextValue = nextChecked
-                        ? [...selectedCongregations, congregation.id]
-                        : selectedCongregations.filter((id) => id !== congregation.id);
-
-                      setValue('linkedCongregations', nextValue, {
-                        shouldValidate: true,
-                        shouldDirty: true,
-                      });
+                    id={`cong-${cong.id}`}
+                    checked={isChecked}
+                    onCheckedChange={(checked) => {
+                      const updated = checked
+                        ? [...watchedLinkedCongregations, cong.id]
+                        : watchedLinkedCongregations.filter((id) => id !== cong.id);
+                      setValue('linkedCongregations', updated, { shouldDirty: true });
                     }}
                   />
-                  <label htmlFor={`cong-${congregation.id}`} className="text-sm cursor-pointer">
-                    {congregation.name}{congregation.city ? ` (${congregation.city})` : ''}
-                  </label>
+                  <Label htmlFor={`cong-${cong.id}`} className="cursor-pointer mb-0 text-sm font-normal">
+                    {cong.name}{cong.city ? ` — ${cong.city}` : ''}
+                  </Label>
                 </div>
               );
-            })
-          )}
-        </div>
-        {errors.linkedCongregations && (
-          <p className="text-sm text-red-500">{errors.linkedCongregations.message}</p>
+            })}
+          </div>
         )}
+        {watchedLinkedCongregations.length === 0 && watchedCircuitId && circuitCongregations.length > 0 && (
+          <p className="text-xs text-amber-600">
+            ⚠ No congregations linked — members won't appear in scheduling for this location.
+          </p>
+        )}
+      </div>
+
+      {/* ── Age Group ── */}
+      <div className="space-y-2">
+        <Label htmlFor="ageGroup">Age Group Restriction</Label>
+        <Controller
+          name="ageGroup"
+          control={control}
+          render={({ field }) => (
+            <Select value={field.value ?? 'All ages'} onValueChange={field.onChange}>
+              <SelectTrigger id="ageGroup">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All ages">All ages</SelectItem>
+                <SelectItem value="Adults only">Adults only (exclude Youth)</SelectItem>
+                <SelectItem value="Seniors excluded">Seniors excluded</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        />
+      </div>
+
+      {/* ── Experience Level ── */}
+      <div className="space-y-2">
+        <Label htmlFor="experienceLevel">Experience Level</Label>
+        <Controller
+          name="experienceLevel"
+          control={control}
+          render={({ field }) => (
+            <Select value={field.value ?? 'Any'} onValueChange={field.onChange}>
+              <SelectTrigger id="experienceLevel">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Any">Any experience</SelectItem>
+                <SelectItem value="Intermediate">Intermediate & above</SelectItem>
+                <SelectItem value="Experienced only">Experienced only</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        />
+      </div>
+
+      {/* ── Max Publishers ── */}
+      <div className="space-y-2">
+        <Label htmlFor="maxPublishers">Max Publishers per Shift</Label>
+        <Input
+          id="maxPublishers"
+          type="number"
+          min={1}
+          max={10}
+          {...register('maxPublishers', { valueAsNumber: true })}
+        />
+        {errors.maxPublishers && <p className="text-sm text-red-500">{(errors.maxPublishers as { message?: string }).message}</p>}
       </div>
 
       <div className="space-y-2">
