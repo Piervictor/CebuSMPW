@@ -12,6 +12,7 @@ import {
   MessageSquare,
   BarChart3,
   User,
+  Settings,
   Menu,
   X,
   ChevronDown,
@@ -51,13 +52,22 @@ const navigation: NavItem[] = [
   { name: 'My Schedule', href: '/my-schedule', icon: User, roles: ['member'] },
   { name: 'Circuit Structure', href: '/circuit-structure', icon: Network, roles: ['circuit-admin'] },
   {
+    name: 'Congregations',
+    href: '/congregations',
+    icon: Network,
+    roles: ['circuit-admin', 'congregation-admin'],
+    children: [
+      { name: 'Congregation List', href: '/congregations', icon: Network },
+      { name: 'Circuit Overview', href: '/congregations/circuit-overview', icon: Network },
+    ],
+  },
+  {
     name: 'Locations',
     href: '/locations',
     icon: MapPin,
     roles: ['circuit-admin', 'congregation-admin'],
     children: [
       { name: 'Locations List', href: '/locations', icon: MapPin },
-      { name: 'Circuit Overview', href: '/locations/circuit-overview', icon: Network },
     ],
   },
   {
@@ -87,6 +97,15 @@ const navigation: NavItem[] = [
   },
   { name: 'Reports', href: '/reports', icon: BarChart3, roles: ['circuit-admin', 'congregation-admin'] },
   { name: 'Integrations', href: '/integrations', icon: MessageSquare, roles: ['circuit-admin', 'congregation-admin'] },
+  {
+    name: 'Settings',
+    href: '/settings',
+    icon: Settings,
+    roles: ['circuit-admin', 'congregation-admin'],
+    children: [
+      { name: 'Scheduling Policies', href: '/settings/scheduling-policies', icon: Calendar },
+    ],
+  },
 ];
 
 export function MainLayout() {
@@ -95,9 +114,11 @@ export function MainLayout() {
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     if (location.pathname.startsWith('/scheduling')) initial['Scheduling'] = true;
+    if (location.pathname.startsWith('/congregations')) initial['Congregations'] = true;
     if (location.pathname.startsWith('/locations')) initial['Locations'] = true;
     if (location.pathname.startsWith('/members')) initial['Members'] = true;
     if (location.pathname.startsWith('/my-portal')) initial['My Portal'] = true;
+    if (location.pathname.startsWith('/settings')) initial['Settings'] = true;
     return initial;
   });
   const { currentUser } = useAppContext();

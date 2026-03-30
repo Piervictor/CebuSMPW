@@ -9,6 +9,7 @@ import type {
   Circuit, Congregation, Location, Member, MemberAvailability, Shift, Timeslot, DayOfWeek,
   LocationCategory, AgeGroup, ExperienceLevel,
   WeekdayAvailability, MemberStatus, MemberAppearance,
+  SchedulingPolicies,
 } from '../app/data/mockData';
 
 // ─── Row types (what Supabase returns) ──────────────────────
@@ -43,6 +44,7 @@ interface LocationRow {
   age_group: string;
   experience_level: string;
   max_publishers: number;
+  multi_circuit_sharing: boolean;
   notes: string;
 }
 
@@ -72,6 +74,7 @@ interface MemberRow {
   preferred_days: string[];
   preferred_times: string[];
   preferred_locations: string[];
+  suitable_categories: string[];
 }
 
 interface MemberAvailabilityRow {
@@ -123,6 +126,7 @@ function toLocation(row: LocationRow): Location {
     ageGroup: (row.age_group as AgeGroup) || undefined,
     experienceLevel: (row.experience_level as ExperienceLevel) || undefined,
     maxPublishers: row.max_publishers ?? undefined,
+    multiCircuitSharing: row.multi_circuit_sharing ?? false,
     notes: row.notes || '',
   };
 }
@@ -178,6 +182,7 @@ function toMember(row: MemberRow & { member_availability?: MemberAvailabilityRow
     preferredDays: row.preferred_days || [],
     preferredTimes: row.preferred_times || [],
     preferredLocations: row.preferred_locations || [],
+    suitableCategories: (row.suitable_categories || []) as LocationCategory[],
   };
 }
 
@@ -305,6 +310,7 @@ export const supabaseLocationService = {
       age_group: location.ageGroup ?? 'All ages',
       experience_level: location.experienceLevel ?? 'Any',
       max_publishers: location.maxPublishers ?? 3,
+      multi_circuit_sharing: location.multiCircuitSharing ?? false,
       notes: location.notes || '',
     };
     console.log('Supabase locations.create payload:', payload);
@@ -328,6 +334,7 @@ export const supabaseLocationService = {
     if (updates.ageGroup !== undefined) payload.age_group = updates.ageGroup;
     if (updates.experienceLevel !== undefined) payload.experience_level = updates.experienceLevel;
     if (updates.maxPublishers !== undefined) payload.max_publishers = updates.maxPublishers;
+    if (updates.multiCircuitSharing !== undefined) payload.multi_circuit_sharing = updates.multiCircuitSharing;
     if (updates.notes !== undefined) payload.notes = updates.notes;
 
     const { data, error } = await supabase
@@ -395,6 +402,7 @@ export const supabaseMemberService = {
       preferred_days: member.preferredDays ?? [],
       preferred_times: member.preferredTimes ?? [],
       preferred_locations: member.preferredLocations ?? [],
+      suitable_categories: member.suitableCategories ?? [],
     };
 
     const { data: memberData, error: memberError } = await supabase
@@ -468,6 +476,7 @@ export const supabaseMemberService = {
     if (updates.preferredDays !== undefined) payload.preferred_days = updates.preferredDays;
     if (updates.preferredTimes !== undefined) payload.preferred_times = updates.preferredTimes;
     if (updates.preferredLocations !== undefined) payload.preferred_locations = updates.preferredLocations;
+    if (updates.suitableCategories !== undefined) payload.suitable_categories = updates.suitableCategories;
 
     if (Object.keys(payload).length > 0) {
       const { error } = await supabase.from('members').update(payload).eq('id', id);
@@ -823,5 +832,61 @@ export const supabaseShiftService = {
     const status = assignedCount === 0 ? 'open' : assignedCount >= requiredCount ? 'filled' : 'partial';
 
     await supabase.from('shifts').update({ status }).eq('id', shiftId);
+  },
+};
+
+// ─── Scheduling Policies Service ────────────────────────────
+
+interface SchedulingPoliciesRow {
+  key: string;
+  weekly_limit: number;
+  monthly_limit: number;
+  allow_same_day: boolean;
+  allow_consecutive_day: boolean;
+  updated_at: string;
+}
+
+function toPolicies(row: SchedulingPoliciesRow): SchedulingPolicies {
+  return {
+    weeklyLimit: row.weekly_limit,
+    monthlyLimit: row.monthly_limit,
+    allowSameDayAssignments: row.allow_same_day,
+    allowConsecutiveDayAssignments: row.allow_consecutive_day,
+  };
+}
+
+export const supabaseSchedulingPoliciesService = {
+  async get(): Promise<SchedulingPolicies | null> {
+    const { data, error } = await supabase
+      .from('scheduling_policies')
+      .select('*')
+      .eq('key', 'default')
+      .single();
+    if (error) {
+      console.error('Supabase scheduling_policies.get error:', error);
+      return null;
+    }
+    return toPolicies(data as SchedulingPoliciesRow);
+  },
+
+  async upsert(policies: SchedulingPolicies): Promise<SchedulingPolicies> {
+    const payload = {
+      key: 'default',
+      weekly_limit: policies.weeklyLimit,
+      monthly_limit: policies.monthlyLimit,
+      allow_same_day: policies.allowSameDayAssignments,
+      allow_consecutive_day: policies.allowConsecutiveDayAssignments,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase
+      .from('scheduling_policies')
+      .upsert(payload, { onConflict: 'key' })
+      .select()
+      .single();
+    if (error) {
+      console.error('Supabase scheduling_policies.upsert error:', error);
+      throw new Error(error.message);
+    }
+    return toPolicies(data as SchedulingPoliciesRow);
   },
 };

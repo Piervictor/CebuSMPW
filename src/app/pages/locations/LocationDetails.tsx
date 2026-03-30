@@ -3,6 +3,12 @@ import { useParams, useNavigate } from 'react-router';
 import { Button } from '../../components/ui/button';
 import { Switch } from '../../components/ui/switch';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../../components/ui/tooltip';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -124,6 +130,7 @@ export default function LocationDetails() {
   } | null>(null);
   const [congSearch, setCongSearch] = useState('');
   const [memberSearch, setMemberSearch] = useState('');
+  const [selectedCircuitIds, setSelectedCircuitIds] = useState<Set<string>>(new Set());
 
   const location = locations.find((l) => l.id === id) || null;
   const locationCircuit = location
@@ -138,16 +145,28 @@ export default function LocationDetails() {
         .filter(Boolean) as Congregation[])
     : [];
 
-  // All congregations in the same circuit that aren't already linked
+  // Other circuits available for selection (excludes the location's own circuit)
+  const otherCircuits = useMemo(() => {
+    if (!location) return [];
+    return circuits.filter((c) => c.id !== location.circuitId);
+  }, [location, circuits]);
+
+  // All congregations that aren't already linked
+  // Shows own circuit always + selected other circuits when multi-circuit is ON
   const availableCongregations = useMemo(() => {
     if (!location) return [];
     const linked = new Set(location.linkedCongregations);
     return congregations
-      .filter((c) => c.circuitId === location.circuitId && !linked.has(c.id))
+      .filter((c) => {
+        if (linked.has(c.id)) return false;
+        if (c.circuitId === location.circuitId) return true;
+        if (location.multiCircuitSharing && selectedCircuitIds.has(c.circuitId)) return true;
+        return false;
+      })
       .filter((c) =>
         !congSearch.trim() || c.name.toLowerCase().includes(congSearch.toLowerCase()),
       );
-  }, [location, congregations, congSearch]);
+  }, [location, congregations, congSearch, selectedCircuitIds]);
 
   // Members who have this location in preferredLocations
   const preferredMembers = useMemo(() => {
@@ -538,6 +557,147 @@ export default function LocationDetails() {
                 </div>
               </div>
 
+              {/* Multi-Circuit Sharing toggle */}
+              <div
+                className="rounded-xl overflow-hidden"
+                style={{ border: `1px solid ${C.border}` }}
+              >
+                <div className="flex items-center justify-between px-4 py-3" style={{ backgroundColor: C.white, borderBottom: location.multiCircuitSharing ? `1px solid ${C.borderLight}` : undefined }}>
+                  <div>
+                    <p className="text-sm font-medium" style={{ color: C.text }}>
+                      Multi-Circuit Sharing
+                    </p>
+                    <p className="text-xs mt-0.5 max-w-sm" style={{ color: C.textSecondary }}>
+                      Allow congregations from other circuits to be linked to this location.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={!!location.multiCircuitSharing}
+                    onCheckedChange={async (checked) => {
+                      try {
+                        await updateLocation(location.id, { multiCircuitSharing: checked });
+                        if (!checked) setSelectedCircuitIds(new Set());
+                        toast.success(checked ? 'Multi-circuit sharing enabled' : 'Multi-circuit sharing disabled');
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : 'Failed to update');
+                      }
+                    }}
+                    disabled={isLoading}
+                  />
+                </div>
+
+                {/* Circuit selector — visible when multi-circuit sharing is ON */}
+                {location.multiCircuitSharing && (
+                  <div style={{ backgroundColor: C.white }}>
+                    <div className="px-4 py-2" style={{ borderBottom: `1px solid ${C.borderLight}` }}>
+                      <p className="text-xs font-semibold" style={{ color: C.textSecondary }}>
+                        Select circuits to include
+                      </p>
+                    </div>
+
+                    {/* Own circuit — always included */}
+                    <div
+                      className="flex items-center justify-between px-4 py-2.5"
+                      style={{ borderBottom: `1px solid ${C.borderLight}` }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" checked disabled className="h-3.5 w-3.5 accent-[#4F6BED]" />
+                        <span className="text-sm font-medium" style={{ color: C.text }}>
+                          {locationCircuit?.name || 'Current Circuit'}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: C.accentLight, color: C.accent }}>Own</span>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs gap-1"
+                        disabled={isLoading}
+                        onClick={async () => {
+                          const linked = new Set(location.linkedCongregations);
+                          const toLink = congregations
+                            .filter((c) => c.circuitId === location.circuitId && !linked.has(c.id))
+                            .map((c) => c.id);
+                          if (toLink.length === 0) {
+                            toast.info('All congregations in this circuit are already linked.');
+                            return;
+                          }
+                          try {
+                            for (const cId of toLink) await handleLinkCongregation(cId);
+                            toast.success(`Linked ${toLink.length} congregation${toLink.length > 1 ? 's' : ''} from ${locationCircuit?.name || 'this circuit'}!`);
+                          } catch { toast.error('Failed to link all congregations.'); }
+                        }}
+                      >
+                        <Users className="h-3.5 w-3.5" /> Link all
+                      </Button>
+                    </div>
+
+                    {/* Other circuits */}
+                    {otherCircuits.length === 0 ? (
+                      <div className="px-4 py-4 text-center">
+                        <p className="text-xs" style={{ color: C.textMuted }}>No other circuits available.</p>
+                      </div>
+                    ) : (
+                      otherCircuits.map((circuit, i) => {
+                        const isSelected = selectedCircuitIds.has(circuit.id);
+                        return (
+                          <div
+                            key={circuit.id}
+                            className="flex items-center justify-between px-4 py-2.5"
+                            style={{
+                              borderBottom:
+                                i < otherCircuits.length - 1 ? `1px solid ${C.borderLight}` : undefined,
+                            }}
+                          >
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="h-3.5 w-3.5 accent-[#4F6BED]"
+                                checked={isSelected}
+                                onChange={() => {
+                                  setSelectedCircuitIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(circuit.id)) next.delete(circuit.id);
+                                    else next.add(circuit.id);
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <span className="text-sm" style={{ color: isSelected ? C.text : C.textSecondary }}>
+                                {circuit.name}
+                              </span>
+                            </label>
+                            {isSelected && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs gap-1"
+                                disabled={isLoading}
+                                onClick={async () => {
+                                  const linked = new Set(location.linkedCongregations);
+                                  const toLink = congregations
+                                    .filter((c) => c.circuitId === circuit.id && !linked.has(c.id))
+                                    .map((c) => c.id);
+                                  if (toLink.length === 0) {
+                                    toast.info(`All congregations in ${circuit.name} are already linked.`);
+                                    return;
+                                  }
+                                  try {
+                                    for (const cId of toLink) await handleLinkCongregation(cId);
+                                    toast.success(`Linked ${toLink.length} congregation${toLink.length > 1 ? 's' : ''} from ${circuit.name}!`);
+                                  } catch { toast.error('Failed to link all congregations.'); }
+                                }}
+                              >
+                                <Users className="h-3.5 w-3.5" /> Link all
+                              </Button>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Available to link */}
               <div
                 className="rounded-xl shadow-sm overflow-hidden"
@@ -548,7 +708,9 @@ export default function LocationDetails() {
                     Available Congregations
                   </h4>
                   <span className="text-[10px]" style={{ color: C.textMuted }}>
-                    Same circuit only
+                    {location.multiCircuitSharing && selectedCircuitIds.size > 0
+                      ? `Own + ${selectedCircuitIds.size} circuit${selectedCircuitIds.size > 1 ? 's' : ''}`
+                      : 'Same circuit only'}
                   </span>
                 </div>
                 <div className="px-4 py-2 border-b" style={{ borderColor: C.borderLight }}>
@@ -572,7 +734,12 @@ export default function LocationDetails() {
                       </p>
                     </div>
                   ) : (
-                    availableCongregations.map((cong, i) => (
+                    availableCongregations.map((cong, i) => {
+                      const isCrossCircuit = cong.circuitId !== location.circuitId;
+                      const crossCircuitName = isCrossCircuit
+                        ? circuits.find((ci) => ci.id === cong.circuitId)?.name || 'another circuit'
+                        : '';
+                      return (
                       <div
                         key={cong.id}
                         className="flex items-center justify-between px-4 py-2 transition-colors hover:bg-[#F7F8FA]"
@@ -583,9 +750,23 @@ export default function LocationDetails() {
                               : undefined,
                         }}
                       >
-                        <span className="text-sm" style={{ color: C.text }}>
-                          {cong.name}
-                        </span>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm" style={{ color: isCrossCircuit ? C.textSecondary : C.text }}>
+                            {cong.name}
+                          </span>
+                          {isCrossCircuit && (
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="h-3.5 w-3.5 flex-shrink-0 cursor-help" style={{ color: '#F59E0B' }} />
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-xs text-xs">
+                                  <p>This congregation belongs to <strong>{crossCircuitName}</strong>. Please link the circuit first before assigning members.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </div>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -597,7 +778,8 @@ export default function LocationDetails() {
                           <Plus className="h-3 w-3" /> Link
                         </Button>
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -934,30 +1116,6 @@ export default function LocationDetails() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-
-                  {/* Multi-circuit sharing */}
-                  <div className="flex items-center justify-between px-5 py-4" style={{ backgroundColor: C.white }}>
-                    <div>
-                      <p className="text-sm font-medium" style={{ color: C.text }}>
-                        Multi-Circuit Sharing
-                      </p>
-                      <p className="text-xs mt-0.5 max-w-sm" style={{ color: C.textSecondary }}>
-                        Allow congregations from other circuits to be linked to this location.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={!!location.multiCircuitSharing}
-                      onCheckedChange={async (checked) => {
-                        try {
-                          await updateLocation(location.id, { multiCircuitSharing: checked });
-                          toast.success(checked ? 'Multi-circuit sharing enabled' : 'Multi-circuit sharing disabled');
-                        } catch (err) {
-                          toast.error(err instanceof Error ? err.message : 'Failed to update');
-                        }
-                      }}
-                      disabled={isLoading}
-                    />
                   </div>
 
                   {/* Active status */}

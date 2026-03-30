@@ -1,4 +1,4 @@
-import { createHashRouter } from 'react-router';
+import { createHashRouter, redirect } from 'react-router';
 import { MainLayout } from './components/layout/MainLayout';
 import { AdminGuard, MemberGuard } from './components/RouteGuards';
 import Dashboard from './pages/Dashboard';
@@ -10,6 +10,11 @@ import MemberAvailability from './pages/members/MemberAvailability';
 import MemberParticipation from './pages/members/MemberParticipation';
 import MemberGroups from './pages/members/MemberGroups';
 
+// Congregations module
+import CongregationsLayout from './pages/congregations/CongregationsLayout';
+import CongregationsList from './pages/congregations/CongregationsList';
+import CongregationDetail from './pages/congregations/CongregationDetail';
+
 // Locations module
 import LocationsLayout from './pages/locations/LocationsLayout';
 import LocationsList from './pages/locations/LocationsList';
@@ -18,6 +23,8 @@ import LocationDetails from './pages/locations/LocationDetails';
 import MemberDashboard from './pages/MemberDashboard';
 import Integrations from './pages/Integrations';
 import Reports from './pages/Reports';
+import SettingsLayout from './pages/settings/SettingsLayout';
+import SchedulingPolicies from './pages/settings/SchedulingPolicies';
 
 // Scheduling module
 import SchedulingLayout from './pages/scheduling/SchedulingLayout';
@@ -54,6 +61,24 @@ export const router = createHashRouter([
             Component: CircuitStructure,
           },
           {
+            path: 'congregations',
+            Component: CongregationsLayout,
+            children: [
+              {
+                index: true,
+                Component: CongregationsList,
+              },
+              {
+                path: 'circuit-overview',
+                Component: CircuitOverview,
+              },
+              {
+                path: 'detail/:id',
+                Component: CongregationDetail,
+              },
+            ],
+          },
+          {
             path: 'locations',
             Component: LocationsLayout,
             children: [
@@ -63,7 +88,7 @@ export const router = createHashRouter([
               },
               {
                 path: 'circuit-overview',
-                Component: CircuitOverview,
+                loader: () => redirect('/congregations/circuit-overview'),
               },
               {
                 path: 'detail/:id',
@@ -127,6 +152,20 @@ export const router = createHashRouter([
             path: 'reports',
             Component: Reports,
           },
+          {
+            path: 'settings',
+            Component: SettingsLayout,
+            children: [
+              {
+                index: true,
+                Component: SchedulingPolicies,
+              },
+              {
+                path: 'scheduling-policies',
+                Component: SchedulingPolicies,
+              },
+            ],
+          },
         ],
       },
 
@@ -169,6 +208,11 @@ export const router = createHashRouter([
             ],
           },
         ],
+      },
+      // Catch-all: redirect unmatched paths to dashboard
+      {
+        path: '*',
+        loader: () => redirect('/'),
       },
     ],
   },

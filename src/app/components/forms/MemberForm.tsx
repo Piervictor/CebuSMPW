@@ -47,6 +47,15 @@ const APPEARANCE_COLORS: Record<string, string> = {
   Average: 'border-amber-400 bg-amber-50 text-amber-700',
 };
 
+const LOCATION_CATEGORIES: string[] = ['Hospital', 'Plaza', 'Terminal', 'Mall'];
+const CATEGORY_COLORS: Record<string, string> = {
+  Hospital: 'border-rose-400 bg-rose-50 text-rose-700',
+  Plaza: 'border-sky-400 bg-sky-50 text-sky-700',
+  Terminal: 'border-amber-400 bg-amber-50 text-amber-700',
+  Mall: 'border-violet-400 bg-violet-50 text-violet-700',
+};
+const DEFAULT_CATEGORY_COLOR = 'border-teal-400 bg-teal-50 text-teal-700';
+
 function calculateAge(dob: string): number | undefined {
   if (!dob) return undefined;
   const birth = new Date(dob);
@@ -64,7 +73,7 @@ interface MemberFormProps {
 }
 
 export function MemberForm({ member, onSuccess, onCancel }: MemberFormProps) {
-  const { createMember, updateMember, congregations, circuits, isLoading, clearError } = useAppContext();
+  const { createMember, updateMember, congregations, circuits, locationCategories, isLoading, clearError } = useAppContext();
   const isEditMode = !!member;
   const schema = isEditMode ? UpdateMemberSchema : CreateMemberSchema;
   const [formError, setFormError] = useState<string | null>(null);
@@ -115,6 +124,7 @@ export function MemberForm({ member, onSuccess, onCancel }: MemberFormProps) {
           preferredDays: member.preferredDays || [],
           preferredTimes: member.preferredTimes || [],
           preferredLocations: member.preferredLocations || [],
+          suitableCategories: member.suitableCategories || [],
         }
       : {
           surname: '',
@@ -138,6 +148,7 @@ export function MemberForm({ member, onSuccess, onCancel }: MemberFormProps) {
           preferredDays: [],
           preferredTimes: [],
           preferredLocations: [],
+          suitableCategories: [],
         },
   });
 
@@ -464,6 +475,44 @@ export function MemberForm({ member, onSuccess, onCancel }: MemberFormProps) {
             />
           </div>
         </div>
+      </div>
+
+      {/* ─── Suitable Location Categories ─── */}
+      <div className="space-y-4 p-4 bg-neutral-50 rounded-lg">
+        <p className="text-sm font-semibold text-neutral-700">Suitable Location Categories</p>
+        <p className="text-xs text-neutral-500">Select location types this member is suited for. Used for scheduling prioritization.</p>
+        <Controller
+          name="suitableCategories"
+          control={control}
+          render={({ field }) => {
+            const selected: string[] = (field.value as string[]) || [];
+            const toggle = (cat: string) => {
+              field.onChange(
+                selected.includes(cat) ? selected.filter((c) => c !== cat) : [...selected, cat],
+              );
+            };
+            // Use dynamic categories from context, fallback to hardcoded defaults
+            const categories = locationCategories.length > 0 ? locationCategories : LOCATION_CATEGORIES;
+            return (
+              <div className="flex gap-2 flex-wrap">
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => toggle(cat)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md border-2 transition-all ${
+                      selected.includes(cat)
+                        ? (CATEGORY_COLORS[cat] || DEFAULT_CATEGORY_COLOR)
+                        : 'border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            );
+          }}
+        />
       </div>
 
       {/* ─── Form Actions ─── */}

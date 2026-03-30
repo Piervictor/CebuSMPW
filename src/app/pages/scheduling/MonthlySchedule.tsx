@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { SchedulingBreadcrumb } from '../../components/SchedulingBreadcrumb';
+import { PolicySummaryPanel } from '../../components/PolicySummaryPanel';
 import { MemberTooltip } from '../../components/MemberTooltip';
 import { toLocalDateStr } from '../../../lib/dateUtils';
 import { Button } from '../../components/ui/button';
@@ -12,6 +13,7 @@ import {
   type Shift,
   type Member,
   type WeekdayAvailability,
+  type LocationCategory,
 } from '../../data/mockData';
 import { useAppContext } from '../../hooks/useAppContext';
 import {
@@ -79,15 +81,70 @@ function checkAvailabilityMatch(
   return { available: true, reason: '', dayAvailability: memberAvail };
 }
 
+// ─── Suitability helpers ──────────────────────────────────────
+
+const CATEGORY_TAG_STYLES: Record<LocationCategory, { bg: string; text: string }> = {
+  Hospital: { bg: '#FFF1F2', text: '#BE123C' },
+  Plaza:    { bg: '#F0F9FF', text: '#0369A1' },
+  Terminal: { bg: '#FFFBEB', text: '#92400E' },
+  Mall:     { bg: '#F5F3FF', text: '#6D28D9' },
+};
+
+function sortEligibleMembers(
+  eligible: Member[],
+  allShifts: Shift[],
+  locationCategory: LocationCategory | undefined,
+): Member[] {
+  // Build a map of total assignment count and latest assigned date per member.
+  // Includes past AND future shifts so that upcoming assignments are accounted for.
+  const assignmentCountMap = new Map<string, number>();
+  const latestAssignedMap = new Map<string, string>();
+  for (const m of eligible) {
+    let count = 0;
+    let latest = '';
+    for (const s of allShifts) {
+      if (s.assignedMembers.includes(m.id)) {
+        count++;
+        if (s.date > latest) latest = s.date;
+      }
+    }
+    assignmentCountMap.set(m.id, count);
+    latestAssignedMap.set(m.id, latest);
+  }
+
+  return [...eligible].sort((a, b) => {
+    // 1. Suitable for location category first
+    if (locationCategory) {
+      const suitA = a.suitableCategories?.includes(locationCategory) ? 0 : 1;
+      const suitB = b.suitableCategories?.includes(locationCategory) ? 0 : 1;
+      if (suitA !== suitB) return suitA - suitB;
+    }
+
+    // 2. Fewest total assignments first (unassigned members float to top)
+    const countA = assignmentCountMap.get(a.id) || 0;
+    const countB = assignmentCountMap.get(b.id) || 0;
+    if (countA !== countB) return countA - countB;
+
+    // 3. Among same count, least recently assigned first
+    const lastA = latestAssignedMap.get(a.id) || '';
+    const lastB = latestAssignedMap.get(b.id) || '';
+    if (lastA !== lastB) return lastA.localeCompare(lastB);
+
+    // 4. Alphabetical fallback
+    return a.name.localeCompare(b.name);
+  });
+}
+
 // ─── Component ────────────────────────────────────────────────
 
 export default function MonthlySchedule() {
   const {
     shifts, locations, members, congregations,
-    getLocationById, assignMemberToShift, removeFromShift, loadShiftsForWeek, isLoading,
+    getLocationById, assignMemberToShift, removeFromShift, loadShiftsForWeek, isLoading, schedulingPolicies,
   } = useAppContext();
   const getMemberById = (id: string) => members.find((m) => m.id === id);
   const getCongregationName = (id: string) => congregations.find((c) => c.id === id)?.name || 'Unknown';
+  const todayStr = toLocalDateStr(new Date());
 
   const [selectedLocation, setSelectedLocation] = useState('');
   const [selectedMonthOffset, setSelectedMonthOffset] = useState(0);
@@ -199,7 +256,7 @@ export default function MonthlySchedule() {
     const location = getLocationById(shift.locationId);
     if (!location) return [];
 
-    return members.filter((member) => {
+    const filtered = members.filter((member) => {
       if (member.status !== 'Active') return false;
       if (!location.linkedCongregations.includes(member.congregationId)) return false;
       if (location.ageGroup === 'Seniors excluded' && member.ageGroup === 'Senior') return false;
@@ -212,6 +269,8 @@ export default function MonthlySchedule() {
       if (searchTerm && !member.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
       return true;
     });
+
+    return sortEligibleMembers(filtered, shifts, location.category);
   };
 
   /**
@@ -263,20 +322,37 @@ export default function MonthlySchedule() {
 
   const checkMemberWarnings = (member: Member, shift: Shift): string[] => {
     const warnings: string[] = [];
-    if (member.weeklyReservations >= member.weeklyLimit) {
+    if (member.weeklyReservations >= schedulingPolicies.weeklyLimit) {
       warnings.push('Weekly limit reached');
-    } else if (member.weeklyReservations >= member.weeklyLimit - 1) {
+    } else if (member.weeklyReservations >= schedulingPolicies.weeklyLimit - 1) {
       warnings.push('Near weekly limit');
     }
-    if (member.monthlyReservations >= member.monthlyLimit) {
+    if (member.monthlyReservations >= schedulingPolicies.monthlyLimit) {
       warnings.push('Monthly limit reached');
-    } else if (member.monthlyReservations >= member.monthlyLimit - 2) {
+    } else if (member.monthlyReservations >= schedulingPolicies.monthlyLimit - 2) {
       warnings.push('Near monthly limit');
     }
     const memberShifts = shifts.filter(
       (s) => s.assignedMembers.includes(member.id) && s.date === shift.date
     );
     if (memberShifts.length > 0) warnings.push('Has another shift this day');
+    if (!schedulingPolicies.allowSameDayAssignments && memberShifts.length > 0) {
+      warnings.push('Same-day assignments disabled');
+    }
+
+    if (!schedulingPolicies.allowConsecutiveDayAssignments) {
+      const shiftDate = new Date(shift.date + 'T00:00:00');
+      const prevDate = new Date(shiftDate);
+      const nextDate = new Date(shiftDate);
+      prevDate.setDate(shiftDate.getDate() - 1);
+      nextDate.setDate(shiftDate.getDate() + 1);
+      const prevStr = toLocalDateStr(prevDate);
+      const nextStr = toLocalDateStr(nextDate);
+      const hasAdjacent = shifts.some(
+        (s) => s.assignedMembers.includes(member.id) && (s.date === prevStr || s.date === nextStr)
+      );
+      if (hasAdjacent) warnings.push('Consecutive-day assignments disabled');
+    }
     return warnings;
   };
 
@@ -357,7 +433,6 @@ export default function MonthlySchedule() {
     }
   });
   const totalFilteredShifts = Object.values(filteredShiftsByDay).reduce((sum, arr) => sum + arr.length, 0);
-  const firstVacantShift = monthShifts.find((s) => s.status !== 'filled') || null;
 
   // ── Quick Summary stats (all locations for this month) ──
   const allMonthShifts = useMemo(() =>
@@ -415,6 +490,7 @@ export default function MonthlySchedule() {
             { label: location.name },
           ] : [{ label: 'Monthly Schedule' }]),
         ]} />
+        <PolicySummaryPanel />
         {/* ── Top Toolbar ── */}
         <div className="rounded-[10px] p-4 sticky top-14 z-10" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E5E7EB', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
           <div className="flex flex-col lg:flex-row lg:items-center gap-3">
@@ -465,14 +541,7 @@ export default function MonthlySchedule() {
               />
             </div>
 
-            {/* Add assignment */}
-            <Button size="sm" className="h-9 text-[12px] gap-1.5 flex-shrink-0 lg:ml-auto"
-              style={{ backgroundColor: '#4F6BED', color: '#FFFFFF' }}
-              disabled={!firstVacantShift}
-              onClick={() => firstVacantShift && openAssignDialog(firstVacantShift)}>
-              <UserPlus className="h-3.5 w-3.5" />
-              Add Assignment
-            </Button>
+
           </div>
         </div>
 
@@ -628,7 +697,7 @@ export default function MonthlySchedule() {
                   </div>
                 </div>
               ) : (
-                monthDates.map((day) => {
+                monthDates.slice().reverse().map((day) => {
                   const dateStr = toLocalDateStr(day);
                   const dayShifts = filteredShiftsByDay[dateStr];
                   if (!dayShifts || dayShifts.length === 0) return null;
@@ -733,15 +802,19 @@ export default function MonthlySchedule() {
                               )}
 
                               {/* Assign button */}
-                              {!isFilled && (
-                                <Button variant="outline" size="sm"
-                                  className="w-full h-7 text-[11px] gap-1 hover:bg-[#F1F3FF] hover:text-[#4F6BED] hover:border-[#4F6BED]"
-                                  style={{ borderColor: '#E5E7EB', color: '#6B7280' }}
-                                  onClick={() => openAssignDialog(shift)}>
-                                  <UserPlus className="h-3 w-3" />
-                                  Assign Member
-                                </Button>
-                              )}
+                              {!isFilled && (() => {
+                                const isPast = shift.date < todayStr;
+                                return (
+                                  <Button variant="outline" size="sm"
+                                    className="w-full h-7 text-[11px] gap-1 hover:bg-[#F1F3FF] hover:text-[#4F6BED] hover:border-[#4F6BED]"
+                                    style={{ borderColor: '#E5E7EB', color: isPast ? '#9CA3AF' : '#6B7280' }}
+                                    disabled={isPast}
+                                    onClick={() => !isPast && openAssignDialog(shift)}>
+                                    <UserPlus className="h-3 w-3" />
+                                    {isPast ? 'Past Slot' : 'Assign Member'}
+                                  </Button>
+                                );
+                              })()}
                             </div>
                           );
                         })}
@@ -868,16 +941,20 @@ export default function MonthlySchedule() {
               <div className="space-y-1.5 pr-3">
                 {eligibleMembers.map((member) => {
                   const warnings = checkMemberWarnings(member, selectedShift!);
-                  const hasBlockingWarning = warnings.some((w) => w.includes('limit reached'));
+                  const hasBlockingWarning = warnings.some(
+                    (w) => w.includes('limit reached') || w.includes('assignments disabled')
+                  );
                   const alreadyAssigned = selectedShift?.assignedMembers.includes(member.id);
                   const { dayAvailability } = checkAvailabilityMatch(member, selectedShift!);
+                  const shiftLocation = getLocationById(selectedShift!.locationId);
+                  const isSuitable = shiftLocation && member.suitableCategories?.includes(shiftLocation.category);
 
                   return (
                     <div key={member.id}
                       className="p-3 rounded-[10px] transition-colors"
                       style={{
-                        border: alreadyAssigned ? '1px solid #A7F3D0' : hasBlockingWarning ? '1px solid #FECACA' : warnings.length > 0 ? '1px solid #FDE68A' : '1px solid #E5E7EB',
-                        backgroundColor: alreadyAssigned ? '#F0FDF4' : hasBlockingWarning ? '#FEF2F2' : warnings.length > 0 ? '#FFFBEB' : '#FFFFFF',
+                        border: alreadyAssigned ? '1px solid #A7F3D0' : hasBlockingWarning ? '1px solid #FECACA' : warnings.length > 0 ? '1px solid #FDE68A' : isSuitable ? '1px solid #C7D2FE' : '1px solid #E5E7EB',
+                        backgroundColor: alreadyAssigned ? '#F0FDF4' : hasBlockingWarning ? '#FEF2F2' : warnings.length > 0 ? '#FFFBEB' : isSuitable ? '#EEF2FF' : '#FFFFFF',
                       }}
                     >
                       <div className="flex items-center justify-between gap-3">
@@ -891,14 +968,33 @@ export default function MonthlySchedule() {
                               {dayAvailability}
                             </span>
                           </div>
+                          {(member.suitableCategories ?? []).length > 0 && (
+                            <div className="flex items-center gap-1 mt-1 flex-wrap">
+                              {member.suitableCategories!.map((cat) => {
+                                const s = CATEGORY_TAG_STYLES[cat];
+                                const isMatch = shiftLocation?.category === cat;
+                                return (
+                                  <span key={cat} className="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
+                                    style={{
+                                      backgroundColor: s.bg,
+                                      color: s.text,
+                                      outline: isMatch ? `1.5px solid ${s.text}` : 'none',
+                                    }}
+                                  >
+                                    {cat}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
                           <div className="flex items-center gap-2 mt-1 text-[11px]" style={{ color: '#6B7280' }}>
                             <span>{getCongregationName(member.congregationId)}</span>
                             <span style={{ color: '#D1D5DB' }}>·</span>
                             <span>{member.ageGroup}</span>
                             <span style={{ color: '#D1D5DB' }}>·</span>
-                            <span className="tabular-nums">W: {member.weeklyReservations}/{member.weeklyLimit}</span>
+                            <span className="tabular-nums">W: {member.weeklyReservations}/{schedulingPolicies.weeklyLimit}</span>
                             <span style={{ color: '#D1D5DB' }}>·</span>
-                            <span className="tabular-nums">M: {member.monthlyReservations}/{member.monthlyLimit}</span>
+                            <span className="tabular-nums">M: {member.monthlyReservations}/{schedulingPolicies.monthlyLimit}</span>
                           </div>
                           {warnings.length > 0 && (
                             <div className="flex items-center gap-1.5 mt-1.5">

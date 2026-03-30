@@ -18,7 +18,7 @@ import { CreateLocationSchema, UpdateLocationSchema, zodFormResolver } from '../
 import type { LocationFormData, LocationUpdateData } from '../../../schemas';
 import type { Location } from '../../data/mockData';
 import { useAppContext } from '../../hooks/useAppContext';
-import { AlertTriangle, Users } from 'lucide-react';
+import { AlertTriangle, Users, Plus } from 'lucide-react';
 
 interface LocationFormProps {
   location?: Location;
@@ -32,10 +32,14 @@ export function LocationForm({ location, onSuccess, onCancel }: LocationFormProp
     updateLocation,
     circuits,
     congregations,
+    locationCategories,
+    addLocationCategory,
     isLoading,
     clearError,
   } = useAppContext();
   const [formError, setFormError] = useState<string | null>(null);
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
 
   // Clear stale context errors when form mounts
   useEffect(() => { clearError(); }, [clearError]);
@@ -199,20 +203,85 @@ export function LocationForm({ location, onSuccess, onCancel }: LocationFormProp
           name="category"
           control={control}
           render={({ field }) => (
-            <Select value={field.value} onValueChange={field.onChange}>
+            <Select
+              value={field.value}
+              onValueChange={(val) => {
+                if (val === '__add_new__') {
+                  setShowNewCategory(true);
+                } else {
+                  field.onChange(val);
+                }
+              }}
+            >
               <SelectTrigger id="category" className={errors.category ? 'border-red-500' : ''}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Hospital">Hospital</SelectItem>
-                <SelectItem value="Plaza">Plaza</SelectItem>
-                <SelectItem value="Terminal">Terminal</SelectItem>
-                <SelectItem value="Mall">Mall</SelectItem>
+                {locationCategories.map((cat) => (
+                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                ))}
+                <SelectItem value="__add_new__">
+                  <span className="flex items-center gap-1 text-blue-600">
+                    <Plus className="h-3 w-3" /> Add new category…
+                  </span>
+                </SelectItem>
               </SelectContent>
             </Select>
           )}
         />
         {errors.category && <p className="text-sm text-red-500">{errors.category.message}</p>}
+
+        {/* Inline new-category input */}
+        {showNewCategory && (
+          <div className="flex gap-2 items-end mt-2">
+            <div className="flex-1 space-y-1">
+              <Label htmlFor="newCategoryName" className="text-xs">New Category Name</Label>
+              <Input
+                id="newCategoryName"
+                placeholder="e.g., Park, School, Market"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const trimmed = newCategoryName.trim();
+                    if (trimmed) {
+                      addLocationCategory(trimmed);
+                      setValue('category', trimmed, { shouldDirty: true });
+                      setNewCategoryName('');
+                      setShowNewCategory(false);
+                    }
+                  }
+                }}
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                const trimmed = newCategoryName.trim();
+                if (trimmed) {
+                  addLocationCategory(trimmed);
+                  setValue('category', trimmed, { shouldDirty: true });
+                  setNewCategoryName('');
+                  setShowNewCategory(false);
+                }
+              }}
+              disabled={!newCategoryName.trim()}
+            >
+              Add
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => { setShowNewCategory(false); setNewCategoryName(''); }}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* ── Linked Congregations (multi-select checkboxes) ── */}

@@ -1,29 +1,29 @@
 
-  <!DOCTYPE html>
-  <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-      <title>CartSmart Circuit Web App</title>
-      <script>
-        // Redirect to built app when NOT running on Vite dev/preview server
-        const isKnownVitePort = window.location.port === '5173' || window.location.port === '4173';
-        const isAlreadyInDist = window.location.pathname.includes('/dist/');
-
-        if (!isKnownVitePort && !isAlreadyInDist) {
-          const nextUrl = new URL('./dist/index.html', window.location.href);
-          nextUrl.hash = window.location.hash;
-          window.location.replace(nextUrl.toString());
-        }
-      </script>
-    </head>
-
-    <body>
-      <div id="root"></div>
-      <script type="module" src="/src/main.tsx"></script>
-    </body>
-  </html>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <title>CartSmart Circuit Web App</title>
+  </head>
+  <body>
+    <div id="root"><p style="padding:32px;font-family:sans-serif;color:#888">Loading CartSmart…</p></div>
+    <script>
+      window.addEventListener('error', function(e) {
+        document.getElementById('root').innerHTML =
+          '<div style="padding:32px;font-family:monospace"><h1 style="color:red">JS Error</h1><pre>' +
+          e.message + '\n' + (e.filename || '') + ':' + (e.lineno || '') + '</pre></div>';
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        document.getElementById('root').innerHTML =
+          '<div style="padding:32px;font-family:monospace"><h1 style="color:red">Unhandled Promise Rejection</h1><pre>' +
+          (e.reason && e.reason.stack ? e.reason.stack : e.reason) + '</pre></div>';
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
   

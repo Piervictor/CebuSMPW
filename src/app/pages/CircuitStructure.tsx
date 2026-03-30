@@ -32,8 +32,7 @@ export default function CircuitStructure() {
       setSearchParams({}, { replace: true });
       setCongDialogOpen(true);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!selectedCircuitId && circuits[0]) {

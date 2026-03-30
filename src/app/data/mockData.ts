@@ -29,7 +29,10 @@ export interface Congregation {
   coverageRate: number;
 }
 
-export type LocationCategory = 'Hospital' | 'Plaza' | 'Terminal' | 'Mall';
+export type LocationCategory = string;
+
+/** Built-in categories that always appear as options */
+export const DEFAULT_LOCATION_CATEGORIES: string[] = ['Hospital', 'Plaza', 'Terminal', 'Mall'];
 export type AgeGroup = 'All ages' | 'Adults only' | 'Seniors excluded';
 export type ExperienceLevel = 'Any' | 'Experienced only' | 'Intermediate';
 
@@ -91,6 +94,14 @@ export interface Member {
   preferredDays: string[];
   preferredTimes: string[];
   preferredLocations: string[];
+  suitableCategories: LocationCategory[];
+}
+
+export interface SchedulingPolicies {
+  weeklyLimit: number;
+  monthlyLimit: number;
+  allowSameDayAssignments: boolean;
+  allowConsecutiveDayAssignments: boolean;
 }
 
 export type DayOfWeek = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
@@ -302,6 +313,7 @@ export const members: Member[] = [
     preferredDays: ['Monday', 'Wednesday', 'Friday'],
     preferredTimes: ['Morning'],
     preferredLocations: ['loc-1', 'loc-2'],
+    suitableCategories: ['Hospital', 'Plaza'],
   },
   {
     id: 'mem-2',
@@ -329,6 +341,7 @@ export const members: Member[] = [
     preferredDays: ['Saturday', 'Sunday'],
     preferredTimes: ['Morning', 'Afternoon'],
     preferredLocations: ['loc-2', 'loc-3'],
+    suitableCategories: ['Terminal', 'Plaza'],
   },
   {
     id: 'mem-3',
@@ -353,6 +366,7 @@ export const members: Member[] = [
     preferredDays: ['Saturday'],
     preferredTimes: ['Afternoon'],
     preferredLocations: ['loc-2'],
+    suitableCategories: ['Plaza'],
   },
   {
     id: 'mem-4',
@@ -380,6 +394,7 @@ export const members: Member[] = [
     preferredDays: ['Tuesday', 'Thursday'],
     preferredTimes: ['Morning'],
     preferredLocations: ['loc-2', 'loc-5'],
+    suitableCategories: ['Hospital', 'Mall'],
   },
   {
     id: 'mem-5',
@@ -406,6 +421,7 @@ export const members: Member[] = [
     preferredDays: ['Monday', 'Wednesday', 'Friday'],
     preferredTimes: ['Afternoon'],
     preferredLocations: ['loc-2', 'loc-5'],
+    suitableCategories: ['Plaza', 'Mall'],
   },
   {
     id: 'mem-6',
@@ -432,6 +448,7 @@ export const members: Member[] = [
     preferredDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
     preferredTimes: ['Morning', 'Afternoon'],
     preferredLocations: ['loc-2', 'loc-3', 'loc-4'],
+    suitableCategories: ['Terminal', 'Mall', 'Plaza'],
   },
   {
     id: 'mem-7',
@@ -456,6 +473,7 @@ export const members: Member[] = [
     preferredDays: ['Saturday', 'Sunday'],
     preferredTimes: ['Morning'],
     preferredLocations: ['loc-4'],
+    suitableCategories: ['Mall'],
   },
   {
     id: 'mem-8',
@@ -479,6 +497,7 @@ export const members: Member[] = [
     preferredDays: ['Saturday'],
     preferredTimes: ['Afternoon'],
     preferredLocations: ['loc-4', 'loc-5'],
+    suitableCategories: [],
   },
   {
     id: 'mem-9',
@@ -505,6 +524,7 @@ export const members: Member[] = [
     preferredDays: ['Tuesday', 'Thursday', 'Saturday'],
     preferredTimes: ['Morning'],
     preferredLocations: ['loc-4', 'loc-5'],
+    suitableCategories: ['Hospital', 'Mall'],
   },
   {
     id: 'mem-10',
@@ -531,6 +551,7 @@ export const members: Member[] = [
     preferredDays: ['Monday', 'Friday'],
     preferredTimes: ['Afternoon'],
     preferredLocations: ['loc-1', 'loc-2'],
+    suitableCategories: ['Hospital', 'Plaza'],
   },
 ];
 

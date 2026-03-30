@@ -58,10 +58,10 @@ export default function MemberDirectory() {
   useEffect(() => {
     if (searchParams.get('new') === 'member') {
       setSearchParams({}, { replace: true });
-      handleAddMember();
+      setEditingMember(null);
+      setFormDialogOpen(true);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   // Keep selectedMember in sync when members array updates
   useEffect(() => {

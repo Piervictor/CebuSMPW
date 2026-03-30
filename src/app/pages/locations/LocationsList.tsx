@@ -68,8 +68,7 @@ export default function LocationsList() {
         toast.info('Select a location below, then open it to add a timeslot.')
       );
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   // Enrich locations with computed stats
   const enrichedLocations = useMemo(() => {

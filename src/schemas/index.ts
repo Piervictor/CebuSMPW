@@ -41,7 +41,7 @@ export const UserRoleSchema = z.enum(['circuit-admin', 'congregation-admin', 'me
 /**
  * Location Category validation
  */
-export const LocationCategorySchema = z.enum(['Hospital', 'Plaza', 'Terminal', 'Mall']);
+export const LocationCategorySchema = z.string().min(1, 'Category is required');
 
 /**
  * Age Group validation
@@ -276,6 +276,9 @@ export const MemberSchema = z.object({
   preferredLocations: z
     .array(z.string())
     .optional(),
+  suitableCategories: z
+    .array(LocationCategorySchema)
+    .default([]),
 });
 
 export const CreateMemberSchema = MemberSchema.omit({ id: true });

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { toLocalDateStr } from '../../lib/dateUtils';
 import {
   Circuit,
@@ -9,7 +9,9 @@ import {
   Timeslot,
   User,
   UserRole,
+  DEFAULT_LOCATION_CATEGORIES,
   currentUser as initialCurrentUser,
+  SchedulingPolicies,
 } from '../data/mockData';
 import {
   supabaseCircuitService,
@@ -18,6 +20,7 @@ import {
   supabaseMemberService,
   supabaseTimeslotService,
   supabaseShiftService,
+  supabaseSchedulingPoliciesService,
 } from '../../lib/supabaseService';
 
 /**
@@ -36,6 +39,7 @@ interface AppContextType {
   timeslots: Timeslot[];
   isLoading: boolean;
   error: string | null;
+  schedulingPolicies: SchedulingPolicies;
 
   // ============ USER & AUTH ============
   setCurrentUser: (userId: string, role: UserRole) => Promise<void>;
@@ -85,6 +89,13 @@ interface AppContextType {
   refetchData: () => Promise<void>;
   setError: (error: string | null) => void;
   clearError: () => void;
+
+  // ============ LOCATION CATEGORIES ============
+  locationCategories: string[];
+  addLocationCategory: (category: string) => void;
+
+  // ============ SCHEDULING POLICIES ============
+  updateSchedulingPolicies: (updates: Partial<SchedulingPolicies>) => Promise<void>;
 }
 
 // Create context
@@ -107,19 +118,83 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
 
+  // ============ SCHEDULING POLICIES (global) ============
+  const SCHEDULING_POLICIES_KEY = 'cebusmpw_scheduling_policies';
+  const defaultSchedulingPolicies: SchedulingPolicies = {
+    weeklyLimit: 2,
+    monthlyLimit: 8,
+    allowSameDayAssignments: true,
+    allowConsecutiveDayAssignments: true,
+  };
+
+  const [schedulingPolicies, setSchedulingPolicies] = useState<SchedulingPolicies>(() => {
+    try {
+      const stored = localStorage.getItem(SCHEDULING_POLICIES_KEY);
+      if (!stored) return defaultSchedulingPolicies;
+      const parsed = JSON.parse(stored) as Partial<SchedulingPolicies>;
+      return { ...defaultSchedulingPolicies, ...parsed };
+    } catch {
+      return defaultSchedulingPolicies;
+    }
+  });
+
+  // ============ LOCATION CATEGORIES (dynamic) ============
+  const CUSTOM_CATEGORIES_KEY = 'cebusmpw_custom_location_categories';
+
+  const [customCategories, setCustomCategories] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(CUSTOM_CATEGORIES_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Derived: merge defaults + custom + categories already used by existing locations
+  const locationCategories = useMemo(() => {
+    const fromLocations = locations.map((l) => l.category).filter(Boolean);
+    const all = new Set([...DEFAULT_LOCATION_CATEGORIES, ...customCategories, ...fromLocations]);
+    return Array.from(all);
+  }, [locations, customCategories]);
+
+  const addLocationCategory = useCallback((category: string) => {
+    const trimmed = category.trim();
+    if (!trimmed) return;
+    setCustomCategories((prev) => {
+      if (prev.includes(trimmed) || DEFAULT_LOCATION_CATEGORIES.includes(trimmed)) return prev;
+      const updated = [...prev, trimmed];
+      localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  const updateSchedulingPolicies = useCallback(async (updates: Partial<SchedulingPolicies>) => {
+    setSchedulingPolicies((prev) => {
+      const next = { ...prev, ...updates };
+      // Persist to localStorage immediately as fallback
+      localStorage.setItem(SCHEDULING_POLICIES_KEY, JSON.stringify(next));
+      // Persist to Supabase in background
+      supabaseSchedulingPoliciesService.upsert(next).catch((err) =>
+        console.error('Failed to save scheduling policies to Supabase:', err)
+      );
+      return next;
+    });
+  }, []);
+
   // ============ LOAD FROM SUPABASE ON MOUNT ============
   useEffect(() => {
     let cancelled = false;
     const loadData = async () => {
       setIsLoading(true);
       try {
-        const [circuitsData, congregationsData, locationsData, membersData, timeslotsData, shiftsData] = await Promise.all([
+        const [circuitsData, congregationsData, locationsData, membersData, timeslotsData, shiftsData, policiesData] = await Promise.all([
           supabaseCircuitService.getAll(),
           supabaseCongregationService.getAll(),
           supabaseLocationService.getAll(),
           supabaseMemberService.getAll(),
           supabaseTimeslotService.getAll(),
           supabaseShiftService.getAll().catch(() => [] as Shift[]),
+          supabaseSchedulingPoliciesService.get().catch(() => null),
         ]);
         if (!cancelled) {
           setCircuits(circuitsData);
@@ -128,6 +203,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setMembers(membersData);
           setTimeslots(timeslotsData);
           setShifts(shiftsData);
+          if (policiesData) {
+            setSchedulingPolicies(policiesData);
+            localStorage.setItem(SCHEDULING_POLICIES_KEY, JSON.stringify(policiesData));
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -249,6 +328,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { valid: false, reason: 'Member already assigned to this shift' };
       }
 
+      const memberShifts = shifts.filter((s) => s.assignedMembers.includes(memberId));
+
+      if (!schedulingPolicies.allowSameDayAssignments) {
+        const hasSameDay = memberShifts.some((s) => s.date === shift.date);
+        if (hasSameDay) {
+          return { valid: false, reason: 'Same-day assignments are disabled' };
+        }
+      }
+
+      if (!schedulingPolicies.allowConsecutiveDayAssignments) {
+        const shiftDate = new Date(shift.date + 'T00:00:00');
+        const prevDate = new Date(shiftDate);
+        const nextDate = new Date(shiftDate);
+        prevDate.setDate(shiftDate.getDate() - 1);
+        nextDate.setDate(shiftDate.getDate() + 1);
+        const prevStr = toLocalDateStr(prevDate);
+        const nextStr = toLocalDateStr(nextDate);
+        const hasAdjacent = memberShifts.some((s) => s.date === prevStr || s.date === nextStr);
+        if (hasAdjacent) {
+          return { valid: false, reason: 'Consecutive-day assignments are disabled' };
+        }
+      }
+
       // Check weekly limit
       const weekStart = new Date(shift.date);
       weekStart.setDate(weekStart.getDate() - weekStart.getDay());
@@ -262,8 +364,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           s.assignedMembers.includes(memberId)
       );
 
-      if (weeklyShifts.length >= member.weeklyLimit) {
-        return { valid: false, reason: `Weekly limit (${member.weeklyLimit}) exceeded` };
+      if (weeklyShifts.length >= schedulingPolicies.weeklyLimit) {
+        return { valid: false, reason: `Weekly limit (${schedulingPolicies.weeklyLimit}) exceeded` };
       }
 
       // Check monthly limit
@@ -280,13 +382,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           s.assignedMembers.includes(memberId)
       );
 
-      if (monthlyShifts.length >= member.monthlyLimit) {
-        return { valid: false, reason: `Monthly limit (${member.monthlyLimit}) exceeded` };
+      if (monthlyShifts.length >= schedulingPolicies.monthlyLimit) {
+        return { valid: false, reason: `Monthly limit (${schedulingPolicies.monthlyLimit}) exceeded` };
       }
 
       return { valid: true };
     },
-    [shifts, members, locations]
+    [shifts, members, locations, schedulingPolicies]
   );
 
   /**
@@ -613,13 +715,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           throw new Error('Circuit not found');
         }
 
-        const invalidCongregation = newLocation.linkedCongregations.find((congregationId) => {
-          const congregation = congregations.find((c) => c.id === congregationId);
-          return !congregation || congregation.circuitId !== newLocation.circuitId;
-        });
+        if (!newLocation.multiCircuitSharing) {
+          const invalidCongregation = newLocation.linkedCongregations.find((congregationId) => {
+            const congregation = congregations.find((c) => c.id === congregationId);
+            return !congregation || congregation.circuitId !== newLocation.circuitId;
+          });
 
-        if (invalidCongregation) {
-          throw new Error('Linked congregations must belong to the selected circuit');
+          if (invalidCongregation) {
+            throw new Error('Linked congregations must belong to the selected circuit');
+          }
         }
 
         const location = await supabaseLocationService.create(newLocation);
@@ -655,7 +759,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           throw new Error('Circuit not found');
         }
 
-        if (updates.linkedCongregations && resolvedCircuitId) {
+        const isMultiCircuit = updates.multiCircuitSharing ?? existingLocation.multiCircuitSharing;
+        if (updates.linkedCongregations && resolvedCircuitId && !isMultiCircuit) {
           const invalidCongregation = updates.linkedCongregations.find((congregationId) => {
             const congregation = congregations.find((c) => c.id === congregationId);
             return !congregation || congregation.circuitId !== resolvedCircuitId;
@@ -955,6 +1060,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     timeslots,
     isLoading,
     error,
+    schedulingPolicies,
 
     // User & Auth
     setCurrentUser,
@@ -1004,6 +1110,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refetchData,
     setError,
     clearError,
+
+    // Location Categories
+    locationCategories,
+    addLocationCategory,
+
+    // Scheduling Policies
+    updateSchedulingPolicies,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

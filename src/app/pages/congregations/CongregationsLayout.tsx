@@ -1,13 +1,14 @@
 import { NavLink, Outlet, useLocation } from 'react-router';
-import { List, MapPin } from 'lucide-react';
+import { List, Network } from 'lucide-react';
 
-const locationsTabs = [
-  { name: 'Locations List', href: '/locations', icon: List, end: true },
+const congregationsTabs = [
+  { name: 'Congregation List', href: '/congregations', icon: List, end: true },
+  { name: 'Circuit Overview', href: '/congregations/circuit-overview', icon: Network },
 ];
 
-export default function LocationsLayout() {
+export default function CongregationsLayout() {
   const location = useLocation();
-  const isDetailPage = location.pathname.includes('/locations/detail/');
+  const isDetailPage = location.pathname.includes('/congregations/detail/');
 
   return (
     <div className="space-y-5">
@@ -16,16 +17,16 @@ export default function LocationsLayout() {
         <div className="flex items-center gap-3">
           <div
             className="h-9 w-9 rounded-lg flex items-center justify-center"
-            style={{ backgroundColor: '#EEF1FD' }}
+            style={{ backgroundColor: '#F3E8FF' }}
           >
-            <MapPin className="h-[18px] w-[18px]" style={{ color: '#4F6BED' }} />
+            <Network className="h-[18px] w-[18px]" style={{ color: '#7C3AED' }} />
           </div>
           <div>
             <h1 className="text-xl font-semibold tracking-tight" style={{ color: '#111827' }}>
-              Locations
+              Congregations
             </h1>
             <p className="text-[13px] leading-snug" style={{ color: '#6B7280' }}>
-              Manage witnessing locations and view circuit statistics.
+              Manage congregations, view members, and linked locations.
             </p>
           </div>
         </div>
@@ -43,7 +44,7 @@ export default function LocationsLayout() {
         {!isDetailPage && (
           <>
             <nav className="flex gap-1 px-4 pt-3 pb-0 overflow-x-auto">
-              {locationsTabs.map((tab) => (
+              {congregationsTabs.map((tab) => (
                 <NavLink
                   key={tab.href}
                   to={tab.href}
@@ -51,7 +52,7 @@ export default function LocationsLayout() {
                   className={({ isActive }) =>
                     `flex items-center gap-1.5 px-4 py-2.5 text-[13px] font-medium whitespace-nowrap rounded-t-lg transition-colors border-b-2 ${
                       isActive
-                        ? 'border-[#4F6BED] text-[#4F6BED] bg-[#EEF1FD]'
+                        ? 'border-[#7C3AED] text-[#7C3AED] bg-[#F3E8FF]'
                         : 'border-transparent text-[#6B7280] hover:text-[#111827] hover:bg-[#F7F8FA]'
                     }`
                   }

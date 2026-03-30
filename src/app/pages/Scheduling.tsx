@@ -9,6 +9,7 @@ import {
   type Shift,
   type Member,
   type WeekdayAvailability,
+  type LocationCategory,
 } from '../data/mockData';
 import { useAppContext } from '../hooks/useAppContext';
 import {
@@ -95,6 +96,57 @@ function checkAvailabilityMatch(
   }
 
   return { available: true, reason: '', dayAvailability: memberAvail };
+}
+
+// ─── Suitability helpers ──────────────────────────────────────
+
+const CATEGORY_TAG_STYLES: Record<string, { bg: string; text: string }> = {
+  Hospital: { bg: '#FFF1F2', text: '#BE123C' },
+  Plaza:    { bg: '#F0F9FF', text: '#0369A1' },
+  Terminal: { bg: '#FFFBEB', text: '#92400E' },
+  Mall:     { bg: '#F5F3FF', text: '#6D28D9' },
+};
+const DEFAULT_TAG_STYLE = { bg: '#F0FDFA', text: '#0F766E' };
+
+/**
+ * Sort eligible members by:
+ * 1. Suitable for the location category (qualified members first)
+ * 2. Least recently served (fairness among equally-qualified members)
+ * 3. Alphabetical by name as fallback
+ */
+function sortEligibleMembers(
+  eligible: Member[],
+  allShifts: Shift[],
+  locationCategory: LocationCategory | undefined,
+): Member[] {
+  const todayStr = toLocalDateStr(new Date());
+  const lastServedMap = new Map<string, string>();
+  for (const m of eligible) {
+    let latest = '';
+    for (const s of allShifts) {
+      if (s.assignedMembers.includes(m.id) && s.date <= todayStr && s.date > latest) {
+        latest = s.date;
+      }
+    }
+    lastServedMap.set(m.id, latest);
+  }
+
+  return [...eligible].sort((a, b) => {
+    // 1. Suitable for location category first (qualified members surface to top)
+    if (locationCategory) {
+      const suitA = a.suitableCategories?.includes(locationCategory) ? 0 : 1;
+      const suitB = b.suitableCategories?.includes(locationCategory) ? 0 : 1;
+      if (suitA !== suitB) return suitA - suitB;
+    }
+
+    // 2. Least recently served (empty string = never served → highest priority)
+    const lastA = lastServedMap.get(a.id) || '';
+    const lastB = lastServedMap.get(b.id) || '';
+    if (lastA !== lastB) return lastA.localeCompare(lastB);
+
+    // 3. Alphabetical fallback
+    return a.name.localeCompare(b.name);
+  });
 }
 
 // ─── Component ────────────────────────────────────────────────
@@ -198,7 +250,7 @@ export default function Scheduling() {
     const location = getLocationById(shift.locationId);
     if (!location) return [];
 
-    return members.filter((member) => {
+    const filtered = members.filter((member) => {
       if (!location.linkedCongregations.includes(member.congregationId)) return false;
       if (location.ageGroup === 'Seniors excluded' && member.ageGroup === 'Senior') return false;
       if (location.ageGroup === 'Adults only' && member.ageGroup === 'Youth') return false;
@@ -210,6 +262,8 @@ export default function Scheduling() {
       if (searchTerm && !member.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
       return true;
     });
+
+    return sortEligibleMembers(filtered, shifts, location.category);
   };
 
   const checkMemberWarnings = (member: Member, shift: Shift): string[] => {
@@ -693,6 +747,8 @@ export default function Scheduling() {
                   const hasBlockingWarning = warnings.some((w) => w.includes('limit reached'));
                   const alreadyAssigned = selectedShift?.assignedMembers.includes(member.id);
                   const { dayAvailability } = checkAvailabilityMatch(member, selectedShift!);
+                  const shiftLocation = getLocationById(selectedShift!.locationId);
+                  const isSuitable = shiftLocation && member.suitableCategories?.includes(shiftLocation.category);
 
                   return (
                     <div
@@ -704,6 +760,8 @@ export default function Scheduling() {
                           ? 'border-red-200 bg-red-50/50'
                           : warnings.length > 0
                           ? 'border-amber-200 bg-amber-50/50'
+                          : isSuitable
+                          ? 'border-indigo-200 bg-indigo-50/30 hover:border-indigo-300'
                           : 'border-neutral-200 bg-white hover:border-neutral-300'
                       }`}
                     >
@@ -717,6 +775,23 @@ export default function Scheduling() {
                             <span className="text-[10px] font-medium bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
                               {dayAvailability}
                             </span>
+                            {member.suitableCategories?.map((cat) => {
+                              const style = CATEGORY_TAG_STYLES[cat] || DEFAULT_TAG_STYLE;
+                              const isMatch = shiftLocation?.category === cat;
+                              return (
+                                <span
+                                  key={cat}
+                                  className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                                  style={{
+                                    backgroundColor: style.bg,
+                                    color: style.text,
+                                    outline: isMatch ? `1.5px solid ${style.text}` : undefined,
+                                  }}
+                                >
+                                  {cat}
+                                </span>
+                              );
+                            })}
                           </div>
                           <div className="flex items-center gap-2 mt-1 text-xs text-neutral-500">
                             <span>{getCongregationName(member.congregationId)}</span>

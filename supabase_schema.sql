@@ -31,13 +31,14 @@ create table if not exists locations (
   id uuid primary key default gen_random_uuid(),
   circuit_id uuid not null references circuits(id) on delete restrict,
   name text not null,
-  category text not null check (category in ('Hospital', 'Plaza', 'Terminal', 'Mall')),
+  category text not null,
   city text not null default '',
   linked_congregations text[] default '{}',
   active boolean default true,
   age_group text default 'All ages',
   experience_level text default 'Any',
   max_publishers int default 3,
+  multi_circuit_sharing boolean default false,
   notes text default '',
   created_at timestamptz default now()
 );
@@ -165,6 +166,28 @@ create table if not exists shifts (
 );
 
 alter table shifts enable row level security;
+create policy "Allow all access to shifts" on shifts for all using (true) with check (true);
+
+-- =============================================
+-- Scheduling Policies Table
+-- Global assignment limits and rules
+-- Uses a single-row pattern (key = 'default')
+-- =============================================
+
+create table if not exists scheduling_policies (
+  key text primary key default 'default',
+  weekly_limit int not null default 2 check (weekly_limit >= 1 and weekly_limit <= 14),
+  monthly_limit int not null default 8 check (monthly_limit >= 1 and monthly_limit <= 60),
+  allow_same_day boolean not null default true,
+  allow_consecutive_day boolean not null default true,
+  updated_at timestamptz default now()
+);
+
+alter table scheduling_policies enable row level security;
+create policy "Allow all access to scheduling_policies" on scheduling_policies for all using (true) with check (true);
+
+-- Seed the default row
+insert into scheduling_policies (key) values ('default') on conflict (key) do nothing;
 create policy "Allow all access to shifts" on shifts for all using (true) with check (true);
 
 create index if not exists idx_shifts_location on shifts(location_id);

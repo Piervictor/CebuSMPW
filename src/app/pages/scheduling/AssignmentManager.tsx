@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { SchedulingBreadcrumb } from '../../components/SchedulingBreadcrumb';
+import { PolicySummaryPanel } from '../../components/PolicySummaryPanel';
 import { MemberTooltip } from '../../components/MemberTooltip';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -7,11 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { useAppContext } from '../../hooks/useAppContext';
-import type { Shift, Member, WeekdayAvailability } from '../../data/mockData';
+import type { Shift, Member, WeekdayAvailability, LocationCategory } from '../../data/mockData';
 import { toLocalDateStr } from '../../../lib/dateUtils';
 import {
   Clock, MapPin, Search, Users, UserPlus, Calendar, ArrowRightLeft, Trash2,
-  Send, Pencil,
+  Send, Pencil, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -63,6 +64,60 @@ function checkAvailabilityMatch(
   return { available: true, reason: '', dayAvailability: memberAvail };
 }
 
+// ─── Suitability helpers ──────────────────────────────────────
+
+const CATEGORY_TAG_STYLES: Record<LocationCategory, { bg: string; text: string }> = {
+  Hospital: { bg: '#FFF1F2', text: '#BE123C' },
+  Plaza:    { bg: '#F0F9FF', text: '#0369A1' },
+  Terminal: { bg: '#FFFBEB', text: '#92400E' },
+  Mall:     { bg: '#F5F3FF', text: '#6D28D9' },
+};
+
+function sortEligibleMembers(
+  eligible: Member[],
+  allShifts: Shift[],
+  locationCategory: LocationCategory | undefined,
+): Member[] {
+  // Build a map of total assignment count and latest assigned date per member.
+  // Includes past AND future shifts so that upcoming assignments are accounted for.
+  const assignmentCountMap = new Map<string, number>();
+  const latestAssignedMap = new Map<string, string>();
+  for (const m of eligible) {
+    let count = 0;
+    let latest = '';
+    for (const s of allShifts) {
+      if (s.assignedMembers.includes(m.id)) {
+        count++;
+        if (s.date > latest) latest = s.date;
+      }
+    }
+    assignmentCountMap.set(m.id, count);
+    latestAssignedMap.set(m.id, latest);
+  }
+
+  return [...eligible].sort((a, b) => {
+    // 1. Suitable for location category first
+    if (locationCategory) {
+      const suitA = a.suitableCategories?.includes(locationCategory) ? 0 : 1;
+      const suitB = b.suitableCategories?.includes(locationCategory) ? 0 : 1;
+      if (suitA !== suitB) return suitA - suitB;
+    }
+
+    // 2. Fewest total assignments first (unassigned members float to top)
+    const countA = assignmentCountMap.get(a.id) || 0;
+    const countB = assignmentCountMap.get(b.id) || 0;
+    if (countA !== countB) return countA - countB;
+
+    // 3. Among same count, least recently assigned first
+    const lastA = latestAssignedMap.get(a.id) || '';
+    const lastB = latestAssignedMap.get(b.id) || '';
+    if (lastA !== lastB) return lastA.localeCompare(lastB);
+
+    // 4. Alphabetical fallback
+    return a.name.localeCompare(b.name);
+  });
+}
+
 // ─── Component ────────────────────────────────────────────────
 
 type DialogMode = 'replace' | 'move' | null;
@@ -70,7 +125,7 @@ type DialogMode = 'replace' | 'move' | null;
 export default function AssignmentManager() {
   const {
     shifts, locations, members, congregations,
-    getLocationById, assignMemberToShift, removeFromShift, isLoading,
+    getLocationById, assignMemberToShift, removeFromShift, isLoading, schedulingPolicies,
   } = useAppContext();
   const getMemberById = (id: string) => members.find((m) => m.id === id);
   const getCongregationName = (id: string) => congregations.find((c) => c.id === id)?.name || 'Unknown';
@@ -214,7 +269,7 @@ export default function AssignmentManager() {
     const location = getLocationById(targetShift.locationId);
     if (!location) return [];
 
-    return members.filter((member) => {
+    const filtered = members.filter((member) => {
       if (member.id === targetMemberId) return false; // Exclude the member being replaced
       if (targetShift.assignedMembers.includes(member.id)) return false;
       if (!location.linkedCongregations.includes(member.congregationId)) return false;
@@ -226,6 +281,46 @@ export default function AssignmentManager() {
       if (dialogSearch && !member.name.toLowerCase().includes(dialogSearch.toLowerCase())) return false;
       return true;
     });
+
+    return sortEligibleMembers(filtered, shifts, location.category);
+  };
+
+  const checkMemberWarnings = (member: Member, shift: Shift): string[] => {
+    const warnings: string[] = [];
+    if (member.weeklyReservations >= schedulingPolicies.weeklyLimit) {
+      warnings.push('Weekly limit reached');
+    } else if (member.weeklyReservations >= schedulingPolicies.weeklyLimit - 1) {
+      warnings.push('Near weekly limit');
+    }
+    if (member.monthlyReservations >= schedulingPolicies.monthlyLimit) {
+      warnings.push('Monthly limit reached');
+    } else if (member.monthlyReservations >= schedulingPolicies.monthlyLimit - 2) {
+      warnings.push('Near monthly limit');
+    }
+
+    const memberShifts = shifts.filter(
+      (s) => s.assignedMembers.includes(member.id) && s.date === shift.date
+    );
+    if (memberShifts.length > 0) warnings.push('Has another shift this day');
+    if (!schedulingPolicies.allowSameDayAssignments && memberShifts.length > 0) {
+      warnings.push('Same-day assignments disabled');
+    }
+
+    if (!schedulingPolicies.allowConsecutiveDayAssignments) {
+      const shiftDate = new Date(shift.date + 'T00:00:00');
+      const prevDate = new Date(shiftDate);
+      const nextDate = new Date(shiftDate);
+      prevDate.setDate(shiftDate.getDate() - 1);
+      nextDate.setDate(shiftDate.getDate() + 1);
+      const prevStr = toLocalDateStr(prevDate);
+      const nextStr = toLocalDateStr(nextDate);
+      const hasAdjacent = shifts.some(
+        (s) => s.assignedMembers.includes(member.id) && (s.date === prevStr || s.date === nextStr)
+      );
+      if (hasAdjacent) warnings.push('Consecutive-day assignments disabled');
+    }
+
+    return warnings;
   };
 
   // Get available destination shifts for move dialog
@@ -264,6 +359,7 @@ export default function AssignmentManager() {
         { label: 'Scheduling', href: '/scheduling' },
         { label: 'Assignment Manager' },
       ]} />
+      <PolicySummaryPanel />
       {/* ── Top Search & Filter Bar ── */}
       <div className="rounded-[10px] p-4 sticky top-14 z-10" style={{ backgroundColor: '#FFFFFF', border: '1px solid #E5E7EB', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
         <div className="flex flex-col lg:flex-row lg:items-center gap-3">
@@ -546,8 +642,16 @@ export default function AssignmentManager() {
             <div className="space-y-1.5 pr-3">
               {getEligibleReplacements().map((member) => {
                 const { dayAvailability } = checkAvailabilityMatch(member, targetShift!);
+                const shiftLocation = getLocationById(targetShift!.locationId);
+                const isSuitable = shiftLocation && member.suitableCategories?.includes(shiftLocation.category);
+                const warnings = checkMemberWarnings(member, targetShift!);
+                const hasBlockingWarning = warnings.some(
+                  (w) => w.includes('limit reached') || w.includes('assignments disabled')
+                );
                 return (
-                  <div key={member.id} className="p-3 rounded-[10px] hover:bg-[#FAFBFC] transition-colors" style={{ border: '1px solid #E5E7EB' }}>
+                  <div key={member.id} className="p-3 rounded-[10px] hover:bg-[#FAFBFC] transition-colors"
+                    style={{ border: isSuitable ? '1px solid #C7D2FE' : '1px solid #E5E7EB', backgroundColor: isSuitable ? '#EEF2FF' : undefined }}
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -559,14 +663,44 @@ export default function AssignmentManager() {
                             {dayAvailability}
                           </span>
                         </div>
+                        {(member.suitableCategories ?? []).length > 0 && (
+                          <div className="flex items-center gap-1 mt-1 flex-wrap">
+                            {member.suitableCategories!.map((cat) => {
+                              const s = CATEGORY_TAG_STYLES[cat];
+                              const isMatch = shiftLocation?.category === cat;
+                              return (
+                                <span key={cat} className="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
+                                  style={{
+                                    backgroundColor: s.bg,
+                                    color: s.text,
+                                    outline: isMatch ? `1.5px solid ${s.text}` : 'none',
+                                  }}
+                                >
+                                  {cat}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
                         <p className="text-[11px] mt-0.5" style={{ color: '#6B7280' }}>
                           {getCongregationName(member.congregationId)} · {member.ageGroup}
                         </p>
+                        <div className="flex items-center gap-2 mt-1 text-[11px]" style={{ color: '#6B7280' }}>
+                          <span className="tabular-nums">W: {member.weeklyReservations}/{schedulingPolicies.weeklyLimit}</span>
+                          <span style={{ color: '#D1D5DB' }}>·</span>
+                          <span className="tabular-nums">M: {member.monthlyReservations}/{schedulingPolicies.monthlyLimit}</span>
+                        </div>
+                        {warnings.length > 0 && (
+                          <div className="flex items-center gap-1.5 mt-1.5">
+                            <AlertTriangle className="h-3 w-3 flex-shrink-0" style={{ color: '#F59E0B' }} />
+                            <span className="text-[10px]" style={{ color: '#D97706' }}>{warnings.join(' · ')}</span>
+                          </div>
+                        )}
                       </div>
                       <Button size="sm" className="h-7 text-[11px] gap-1"
                         style={{ backgroundColor: '#4F6BED', color: '#FFFFFF' }}
                         onClick={() => handleReplace(member.id)}
-                        disabled={isLoading}
+                        disabled={hasBlockingWarning || isLoading}
                       >
                         <ArrowRightLeft className="h-3 w-3" />
                         Replace

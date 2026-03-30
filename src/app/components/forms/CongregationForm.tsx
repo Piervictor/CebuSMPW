@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Alert, AlertDescription } from '../ui/alert';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 import { toast } from 'sonner';
 import {
   CreateCongregationSchema,
@@ -24,7 +31,7 @@ interface CongregationFormProps {
 }
 
 export function CongregationForm({ congregation, circuitId, onSuccess, onCancel }: CongregationFormProps) {
-  const { createCongregation, updateCongregation, isLoading, clearError } = useAppContext();
+  const { circuits, createCongregation, updateCongregation, isLoading, clearError } = useAppContext();
   const isEditMode = !!congregation;
   const schema = isEditMode ? UpdateCongregationSchema : CreateCongregationSchema;
   const [formError, setFormError] = useState<string | null>(null);
@@ -35,6 +42,7 @@ export function CongregationForm({ congregation, circuitId, onSuccess, onCancel 
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors, isSubmitting },
     reset,
   } = useForm<CongregationFormData | CongregationUpdateData>({
@@ -65,7 +73,7 @@ export function CongregationForm({ congregation, circuitId, onSuccess, onCancel 
         await updateCongregation(congregation.id, data);
         toast.success('Congregation updated successfully');
       } else {
-        await createCongregation({ ...data, circuitId } as CongregationFormData);
+        await createCongregation(data as CongregationFormData);
         toast.success('Congregation created successfully');
         reset();
       }
@@ -92,6 +100,29 @@ export function CongregationForm({ congregation, circuitId, onSuccess, onCancel 
           <AlertDescription>{formError}</AlertDescription>
         </Alert>
       )}
+
+      <div className="space-y-2">
+        <Label htmlFor="cong-circuit">Circuit *</Label>
+        <Controller
+          name="circuitId"
+          control={control}
+          render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger className={errors.circuitId ? 'border-red-500' : ''}>
+                <SelectValue placeholder="Select a circuit" />
+              </SelectTrigger>
+              <SelectContent>
+                {circuits.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        />
+        {errors.circuitId && <p className="text-sm text-red-500">{(errors.circuitId as { message?: string }).message}</p>}
+      </div>
 
       <div className="space-y-2">
         <Label htmlFor="cong-name">Congregation Name *</Label>

@@ -1,6 +1,26 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useAppContext } from '../../hooks/useAppContext';
-import { Network, Users, MapPin, Clock, Hash } from 'lucide-react';
+import { Network, Users, MapPin, Clock, Hash, Pencil, Trash2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../components/ui/alert-dialog';
+import { CircuitForm } from '../../components/forms/CircuitForm';
+import { toast } from 'sonner';
+import type { Circuit } from '../../data/mockData';
 
 // Design tokens
 const C = {
@@ -15,11 +35,31 @@ const C = {
   success: '#10B981',
   warn: '#F59E0B',
   purple: '#7C3AED',
+  danger: '#EF4444',
+  dangerLight: '#FEF2F2',
   shadow: '0 1px 3px 0 rgba(0,0,0,0.1), 0 1px 2px -1px rgba(0,0,0,0.1)',
 };
 
 export default function CircuitOverview() {
-  const { circuits, congregations, locations, members, timeslots } = useAppContext();
+  const { circuits, congregations, locations, members, timeslots, deleteCircuit } = useAppContext();
+
+  const [editCircuit, setEditCircuit] = useState<Circuit | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Circuit | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      await deleteCircuit(deleteTarget.id);
+      toast.success(`Circuit "${deleteTarget.name}" deleted successfully`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete circuit');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const circuitStats = useMemo(() => {
     return circuits.map((circuit) => {
@@ -95,6 +135,24 @@ export default function CircuitOverview() {
                   {circuit.city && ` · ${circuit.city}`}
                 </p>
               </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setEditCircuit(circuit)}
+                  className="h-8 w-8 rounded-lg flex items-center justify-center transition-colors hover:bg-gray-100"
+                  title="Edit circuit"
+                >
+                  <Pencil className="h-3.5 w-3.5" style={{ color: C.textSecondary }} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(circuit)}
+                  className="h-8 w-8 rounded-lg flex items-center justify-center transition-colors hover:bg-red-50"
+                  title="Delete circuit"
+                >
+                  <Trash2 className="h-3.5 w-3.5" style={{ color: C.danger }} />
+                </button>
+              </div>
             </div>
 
             <div
@@ -161,6 +219,48 @@ export default function CircuitOverview() {
           </div>
         ))}
       </div>
+
+      {/* Edit Circuit Dialog */}
+      <Dialog open={!!editCircuit} onOpenChange={(open) => !open && setEditCircuit(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Circuit</DialogTitle>
+            <DialogDescription>
+              Update the details for {editCircuit?.name}.
+            </DialogDescription>
+          </DialogHeader>
+          {editCircuit && (
+            <CircuitForm
+              circuit={editCircuit}
+              onSuccess={() => setEditCircuit(null)}
+              onCancel={() => setEditCircuit(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Circuit Confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure you want to delete this circuit?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>{deleteTarget?.name}</strong> and remove all
+              associated data. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              {isDeleting ? 'Deleting...' : 'Delete Circuit'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
