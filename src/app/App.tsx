@@ -1,10 +1,12 @@
-import { RouterProvider } from 'react-router';
-import { router } from './routes';
 import { Toaster } from './components/ui/sonner';
 import { RoleSwitcher } from './components/RoleSwitcher';
 import { AppProvider } from './hooks/useAppContext';
-import { AuthProvider } from './hooks/useAuth';
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
+
+// Lazy-load the heavy router + auth tree — only needed after role selection
+const AuthenticatedApp = React.lazy(() =>
+  import('./AuthenticatedApp').then((mod) => ({ default: mod.default }))
+);
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -37,18 +39,15 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <AppProvider>
-          {showRoleSwitcher ? (
-            <RoleSwitcher onRoleChange={() => setShowRoleSwitcher(false)} />
-          ) : (
-            <>
-              <RouterProvider router={router} />
-              <Toaster />
-            </>
-          )}
-        </AppProvider>
-      </AuthProvider>
+      <AppProvider>
+        {showRoleSwitcher ? (
+          <RoleSwitcher onRoleChange={() => setShowRoleSwitcher(false)} />
+        ) : (
+          <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-neutral-400">Loading…</div>}>
+            <AuthenticatedApp />
+          </Suspense>
+        )}
+      </AppProvider>
     </ErrorBoundary>
   );
 }

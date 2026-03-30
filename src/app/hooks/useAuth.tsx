@@ -36,10 +36,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [authProfile, setAuthProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // Load profile whenever the Supabase session changes
+  // Load profile whenever the Supabase session changes (with timeout)
   const refreshProfile = useCallback(async () => {
     try {
-      const profile = await getUserProfile();
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Auth profile timed out')), 5000),
+      );
+      const profile = await Promise.race([getUserProfile(), timeout]);
       setAuthProfile(profile);
     } catch {
       setAuthProfile(null);

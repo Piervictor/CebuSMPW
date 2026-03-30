@@ -6,12 +6,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <title>CartSmart Circuit Web App</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
+    <title>Cart Witnessing Management</title>
   </head>
   <body>
-    <div id="root"><p style="padding:32px;font-family:sans-serif;color:#888">Loading CartSmart…</p></div>
+    <div id="root"><p id="app-loading" style="padding:32px;font-family:sans-serif;color:#888">Loading Cart Witnessing Management…</p></div>
     <script>
+      (function() {
+        var defaultAppName = 'Cart Witnessing Management';
+        var appName = defaultAppName;
+        try {
+          var stored = window.localStorage.getItem('cebusmpw_app_name');
+          if (stored && stored.trim()) {
+            appName = stored.trim();
+          }
+        } catch (error) {
+          console.warn('Unable to load stored app name', error);
+        }
+
+        document.title = appName;
+        var loadingMessage = document.getElementById('app-loading');
+        if (loadingMessage) {
+          loadingMessage.textContent = 'Loading ' + appName + '…';
+        }
+      })();
+
       window.addEventListener('error', function(e) {
         document.getElementById('root').innerHTML =
           '<div style="padding:32px;font-family:monospace"><h1 style="color:red">JS Error</h1><pre>' +

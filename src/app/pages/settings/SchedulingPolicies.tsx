@@ -32,13 +32,6 @@ export default function SchedulingPolicies() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold text-neutral-900">Scheduling Policies</h1>
-        <p className="text-neutral-600 mt-1">
-          Define global assignment limits and rules applied across scheduling.
-        </p>
-      </div>
-
       <Card>
         <CardHeader>
           <CardTitle>Assignment Limits</CardTitle>

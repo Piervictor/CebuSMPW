@@ -13,15 +13,29 @@ import {
   currentUser as initialCurrentUser,
   SchedulingPolicies,
 } from '../data/mockData';
-import {
-  supabaseCircuitService,
-  supabaseCongregationService,
-  supabaseLocationService,
-  supabaseMemberService,
-  supabaseTimeslotService,
-  supabaseShiftService,
-  supabaseSchedulingPoliciesService,
-} from '../../lib/supabaseService';
+// Lazy-load Supabase services — avoids pulling the entire Supabase SDK into
+// the initial (RoleSwitcher) render. Services are loaded on first real use.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+let supabaseCircuitService: any;
+let supabaseCongregationService: any;
+let supabaseLocationService: any;
+let supabaseMemberService: any;
+let supabaseTimeslotService: any;
+let supabaseShiftService: any;
+let supabaseSchedulingPoliciesService: any;
+/* eslint-enable @typescript-eslint/no-explicit-any */
+async function ensureServices() {
+  if (supabaseCircuitService) return; // already loaded
+  const mod = await import('../../lib/supabaseService');
+  supabaseCircuitService = mod.supabaseCircuitService;
+  supabaseCongregationService = mod.supabaseCongregationService;
+  supabaseLocationService = mod.supabaseLocationService;
+  supabaseMemberService = mod.supabaseMemberService;
+  supabaseTimeslotService = mod.supabaseTimeslotService;
+  supabaseShiftService = mod.supabaseShiftService;
+  supabaseSchedulingPoliciesService = mod.supabaseSchedulingPoliciesService;
+}
+import { APP_NAME_STORAGE_KEY, DEFAULT_APP_NAME, normalizeAppName } from '../../lib/branding';
 
 /**
  * Main App Context Interface
@@ -30,6 +44,7 @@ import {
  */
 interface AppContextType {
   // ============ STATE ============
+  appName: string;
   currentUser: User | null;
   circuits: Circuit[];
   congregations: Congregation[];
@@ -42,6 +57,7 @@ interface AppContextType {
   schedulingPolicies: SchedulingPolicies;
 
   // ============ USER & AUTH ============
+  updateAppName: (name: string) => void;
   setCurrentUser: (userId: string, role: UserRole) => Promise<void>;
   logout: () => void;
 
@@ -108,6 +124,14 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
  */
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // ============ STATE INITIALIZATION ============
+  const [appName, setAppName] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem(APP_NAME_STORAGE_KEY);
+      return stored ? normalizeAppName(stored) : DEFAULT_APP_NAME;
+    } catch {
+      return DEFAULT_APP_NAME;
+    }
+  });
   const [currentUser, setCurrentUserState] = useState<User | null>(initialCurrentUser);
   const [circuits, setCircuits] = useState<Circuit[]>([]);
   const [congregations, setCongregations] = useState<Congregation[]>([]);
@@ -169,57 +193,82 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const updateSchedulingPolicies = useCallback(async (updates: Partial<SchedulingPolicies>) => {
+    let nextPolicies: SchedulingPolicies | null = null;
     setSchedulingPolicies((prev) => {
       const next = { ...prev, ...updates };
-      // Persist to localStorage immediately as fallback
       localStorage.setItem(SCHEDULING_POLICIES_KEY, JSON.stringify(next));
-      // Persist to Supabase in background
-      supabaseSchedulingPoliciesService.upsert(next).catch((err) =>
-        console.error('Failed to save scheduling policies to Supabase:', err)
-      );
+      nextPolicies = next;
       return next;
     });
+    // Persist to Supabase in background (lazy-loaded)
+    if (nextPolicies) {
+      ensureServices().then(() =>
+        supabaseSchedulingPoliciesService.upsert(nextPolicies!).catch((err: unknown) =>
+          console.error('Failed to save scheduling policies to Supabase:', err)
+        )
+      );
+    }
   }, []);
 
-  // ============ LOAD FROM SUPABASE ON MOUNT ============
-  useEffect(() => {
-    let cancelled = false;
-    const loadData = async () => {
-      setIsLoading(true);
-      try {
-        const [circuitsData, congregationsData, locationsData, membersData, timeslotsData, shiftsData, policiesData] = await Promise.all([
-          supabaseCircuitService.getAll(),
-          supabaseCongregationService.getAll(),
-          supabaseLocationService.getAll(),
-          supabaseMemberService.getAll(),
-          supabaseTimeslotService.getAll(),
-          supabaseShiftService.getAll().catch(() => [] as Shift[]),
-          supabaseSchedulingPoliciesService.get().catch(() => null),
-        ]);
-        if (!cancelled) {
-          setCircuits(circuitsData);
-          setCongregations(congregationsData);
-          setLocations(locationsData);
-          setMembers(membersData);
-          setTimeslots(timeslotsData);
-          setShifts(shiftsData);
-          if (policiesData) {
-            setSchedulingPolicies(policiesData);
-            localStorage.setItem(SCHEDULING_POLICIES_KEY, JSON.stringify(policiesData));
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Failed to load data from Supabase:', err);
-          setErrorState(err instanceof Error ? err.message : 'Failed to load data');
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    };
-    loadData();
-    return () => { cancelled = true; };
+  const updateAppName = useCallback((name: string) => {
+    const next = normalizeAppName(name);
+    setAppName(next);
+    localStorage.setItem(APP_NAME_STORAGE_KEY, next);
   }, []);
+
+  useEffect(() => {
+    document.title = appName;
+  }, [appName]);
+
+  // ============ TIMEOUT UTILITY ============
+  const FETCH_TIMEOUT_MS = 8000; // 8-second timeout for each Supabase call
+
+  function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      promise.then(
+        (val) => { clearTimeout(timer); resolve(val); },
+        (err) => { clearTimeout(timer); reject(err); },
+      );
+    });
+  }
+
+  // ============ LOAD FROM SUPABASE (deferred — called after role selection) ============
+  const [dataLoaded, setDataLoaded] = useState(false);
+
+  const loadAllData = useCallback(async () => {
+    if (dataLoaded) return; // don't re-fetch if already loaded
+    await ensureServices();
+    setIsLoading(true);
+    try {
+      const [circuitsData, congregationsData, locationsData, membersData, timeslotsData, shiftsData, policiesData] = await Promise.all([
+        withTimeout(supabaseCircuitService.getAll(), FETCH_TIMEOUT_MS, 'circuits').catch(() => [] as Circuit[]),
+        withTimeout(supabaseCongregationService.getAll(), FETCH_TIMEOUT_MS, 'congregations').catch(() => [] as Congregation[]),
+        withTimeout(supabaseLocationService.getAll(), FETCH_TIMEOUT_MS, 'locations').catch(() => [] as Location[]),
+        withTimeout(supabaseMemberService.getAll(), FETCH_TIMEOUT_MS, 'members').catch(() => [] as Member[]),
+        withTimeout(supabaseTimeslotService.getAll(), FETCH_TIMEOUT_MS, 'timeslots').catch(() => [] as Timeslot[]),
+        withTimeout(supabaseShiftService.getAll(), FETCH_TIMEOUT_MS, 'shifts').catch(() => [] as Shift[]),
+        withTimeout(supabaseSchedulingPoliciesService.get(), FETCH_TIMEOUT_MS, 'policies').catch(() => null),
+      ]);
+
+      setCircuits(circuitsData);
+      setCongregations(congregationsData);
+      setLocations(locationsData);
+      setMembers(membersData);
+      setTimeslots(timeslotsData);
+      setShifts(shiftsData);
+      if (policiesData) {
+        setSchedulingPolicies(policiesData);
+        localStorage.setItem(SCHEDULING_POLICIES_KEY, JSON.stringify(policiesData));
+      }
+      setDataLoaded(true);
+    } catch (err) {
+      console.error('Failed to load data from Supabase:', err);
+      setErrorState(err instanceof Error ? err.message : 'Failed to load data');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [dataLoaded]);
 
   // ============ ERROR MANAGEMENT ============
   const setError = useCallback((errorMsg: string | null) => {
@@ -238,9 +287,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const setCurrentUser = useCallback(async (userId: string, role: UserRole) => {
     setIsLoading(true);
     try {
-      // Simulate API delay
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
       const user: User = {
         id: userId,
         name: `User ${userId}`,
@@ -251,6 +297,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setCurrentUserState(user);
       clearError();
+
+      // Load data from Supabase now (deferred until role is chosen)
+      loadAllData();
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to set user';
       setError(errorMsg);
@@ -258,7 +307,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } finally {
       setIsLoading(false);
     }
-  }, [setError, clearError]);
+  }, [setError, clearError, loadAllData]);
 
   /**
    * Logout current user
@@ -1025,14 +1074,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * Refetch all data from Supabase
    */
   const refetchData = useCallback(async () => {
+    await ensureServices();
     setIsLoading(true);
     try {
       const [circuitsData, congregationsData, locationsData, timeslotsData, shiftsData] = await Promise.all([
-        supabaseCircuitService.getAll(),
-        supabaseCongregationService.getAll(),
-        supabaseLocationService.getAll(),
-        supabaseTimeslotService.getAll(),
-        supabaseShiftService.getAll().catch(() => [] as Shift[]),
+        withTimeout(supabaseCircuitService.getAll(), FETCH_TIMEOUT_MS, 'circuits').catch(() => [] as Circuit[]),
+        withTimeout(supabaseCongregationService.getAll(), FETCH_TIMEOUT_MS, 'congregations').catch(() => [] as Congregation[]),
+        withTimeout(supabaseLocationService.getAll(), FETCH_TIMEOUT_MS, 'locations').catch(() => [] as Location[]),
+        withTimeout(supabaseTimeslotService.getAll(), FETCH_TIMEOUT_MS, 'timeslots').catch(() => [] as Timeslot[]),
+        withTimeout(supabaseShiftService.getAll(), FETCH_TIMEOUT_MS, 'shifts').catch(() => [] as Shift[]),
       ]);
       setCircuits(circuitsData);
       setCongregations(congregationsData);
@@ -1051,6 +1101,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ============ CONTEXT VALUE ============
   const value: AppContextType = {
     // State
+    appName,
     currentUser,
     circuits,
     congregations,
@@ -1063,6 +1114,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     schedulingPolicies,
 
     // User & Auth
+    updateAppName,
     setCurrentUser,
     logout,
 

@@ -1,47 +1,22 @@
 import { createHashRouter, redirect } from 'react-router';
 import { MainLayout } from './components/layout/MainLayout';
 import { AdminGuard, MemberGuard } from './components/RouteGuards';
-import Dashboard from './pages/Dashboard';
-import CircuitStructure from './pages/CircuitStructure';
-// Members module
+
+// Lazy-load helper: react-router's `lazy` expects { Component }
+const lazy = (importFn: () => Promise<{ default: React.ComponentType }>) => ({
+  lazy: async () => {
+    const mod = await importFn();
+    return { Component: mod.default };
+  },
+});
+
+// Layout components stay eager (tiny, always needed for nested routes)
 import MembersLayout from './pages/members/MembersLayout';
-import MemberDirectory from './pages/members/MemberDirectory';
-import MemberAvailability from './pages/members/MemberAvailability';
-import MemberParticipation from './pages/members/MemberParticipation';
-import MemberGroups from './pages/members/MemberGroups';
-
-// Congregations module
 import CongregationsLayout from './pages/congregations/CongregationsLayout';
-import CongregationsList from './pages/congregations/CongregationsList';
-import CongregationDetail from './pages/congregations/CongregationDetail';
-
-// Locations module
 import LocationsLayout from './pages/locations/LocationsLayout';
-import LocationsList from './pages/locations/LocationsList';
-import CircuitOverview from './pages/locations/CircuitOverview';
-import LocationDetails from './pages/locations/LocationDetails';
-import MemberDashboard from './pages/MemberDashboard';
-import Integrations from './pages/Integrations';
-import Reports from './pages/Reports';
-import SettingsLayout from './pages/settings/SettingsLayout';
-import SchedulingPolicies from './pages/settings/SchedulingPolicies';
-
-// Scheduling module
 import SchedulingLayout from './pages/scheduling/SchedulingLayout';
-import MonthlySchedule from './pages/scheduling/MonthlySchedule';
-import VacantSlots from './pages/scheduling/VacantSlots';
-import AssignmentManager from './pages/scheduling/AssignmentManager';
-import ServiceHistory from './pages/scheduling/ServiceHistory';
-import SchedulingCalendar from './pages/scheduling/SchedulingCalendar';
-
-// Member Portal module
 import MemberPortalLayout from './pages/portal/MemberPortalLayout';
-import MyDashboard from './pages/portal/MyDashboard';
-import MyAssignments from './pages/portal/MyAssignments';
-import JoinVacantSlots from './pages/portal/JoinVacantSlots';
-import MyAvailability from './pages/portal/MyAvailability';
-import MyHistory from './pages/portal/MyHistory';
-import MyProfile from './pages/portal/MyProfile';
+import SettingsLayout from './pages/settings/SettingsLayout';
 
 export const router = createHashRouter([
   {
@@ -54,11 +29,11 @@ export const router = createHashRouter([
         children: [
           {
             index: true,
-            Component: Dashboard,
+            ...lazy(() => import('./pages/Dashboard')),
           },
           {
             path: 'circuit-structure',
-            Component: CircuitStructure,
+            ...lazy(() => import('./pages/CircuitStructure')),
           },
           {
             path: 'congregations',
@@ -66,15 +41,15 @@ export const router = createHashRouter([
             children: [
               {
                 index: true,
-                Component: CongregationsList,
+                ...lazy(() => import('./pages/congregations/CongregationsList')),
               },
               {
                 path: 'circuit-overview',
-                Component: CircuitOverview,
+                ...lazy(() => import('./pages/locations/CircuitOverview')),
               },
               {
                 path: 'detail/:id',
-                Component: CongregationDetail,
+                ...lazy(() => import('./pages/congregations/CongregationDetail')),
               },
             ],
           },
@@ -84,7 +59,7 @@ export const router = createHashRouter([
             children: [
               {
                 index: true,
-                Component: LocationsList,
+                ...lazy(() => import('./pages/locations/LocationsList')),
               },
               {
                 path: 'circuit-overview',
@@ -92,7 +67,7 @@ export const router = createHashRouter([
               },
               {
                 path: 'detail/:id',
-                Component: LocationDetails,
+                ...lazy(() => import('./pages/locations/LocationDetails')),
               },
             ],
           },
@@ -102,19 +77,19 @@ export const router = createHashRouter([
             children: [
               {
                 index: true,
-                Component: MemberDirectory,
+                ...lazy(() => import('./pages/members/MemberDirectory')),
               },
               {
                 path: 'availability',
-                Component: MemberAvailability,
+                ...lazy(() => import('./pages/members/MemberAvailability')),
               },
               {
                 path: 'participation',
-                Component: MemberParticipation,
+                ...lazy(() => import('./pages/members/MemberParticipation')),
               },
               {
                 path: 'groups',
-                Component: MemberGroups,
+                ...lazy(() => import('./pages/members/MemberGroups')),
               },
             ],
           },
@@ -124,33 +99,33 @@ export const router = createHashRouter([
             children: [
               {
                 index: true,
-                Component: MonthlySchedule,
+                ...lazy(() => import('./pages/scheduling/MonthlySchedule')),
               },
               {
                 path: 'vacant-slots',
-                Component: VacantSlots,
+                ...lazy(() => import('./pages/scheduling/VacantSlots')),
               },
               {
                 path: 'assignments',
-                Component: AssignmentManager,
+                ...lazy(() => import('./pages/scheduling/AssignmentManager')),
               },
               {
                 path: 'history',
-                Component: ServiceHistory,
+                ...lazy(() => import('./pages/scheduling/ServiceHistory')),
               },
               {
                 path: 'calendar',
-                Component: SchedulingCalendar,
+                ...lazy(() => import('./pages/scheduling/SchedulingCalendar')),
               },
             ],
           },
           {
             path: 'integrations',
-            Component: Integrations,
+            ...lazy(() => import('./pages/Integrations')),
           },
           {
             path: 'reports',
-            Component: Reports,
+            ...lazy(() => import('./pages/Reports')),
           },
           {
             path: 'settings',
@@ -158,11 +133,15 @@ export const router = createHashRouter([
             children: [
               {
                 index: true,
-                Component: SchedulingPolicies,
+                ...lazy(() => import('./pages/settings/BrandingSettings')),
+              },
+              {
+                path: 'branding',
+                ...lazy(() => import('./pages/settings/BrandingSettings')),
               },
               {
                 path: 'scheduling-policies',
-                Component: SchedulingPolicies,
+                ...lazy(() => import('./pages/settings/SchedulingPolicies')),
               },
             ],
           },
@@ -175,7 +154,7 @@ export const router = createHashRouter([
         children: [
           {
             path: 'my-schedule',
-            Component: MemberDashboard,
+            ...lazy(() => import('./pages/MemberDashboard')),
           },
           {
             path: 'my-portal',
@@ -183,27 +162,27 @@ export const router = createHashRouter([
             children: [
               {
                 index: true,
-                Component: MyDashboard,
+                ...lazy(() => import('./pages/portal/MyDashboard')),
               },
               {
                 path: 'assignments',
-                Component: MyAssignments,
+                ...lazy(() => import('./pages/portal/MyAssignments')),
               },
               {
                 path: 'join',
-                Component: JoinVacantSlots,
+                ...lazy(() => import('./pages/portal/JoinVacantSlots')),
               },
               {
                 path: 'availability',
-                Component: MyAvailability,
+                ...lazy(() => import('./pages/portal/MyAvailability')),
               },
               {
                 path: 'history',
-                Component: MyHistory,
+                ...lazy(() => import('./pages/portal/MyHistory')),
               },
               {
                 path: 'profile',
-                Component: MyProfile,
+                ...lazy(() => import('./pages/portal/MyProfile')),
               },
             ],
           },

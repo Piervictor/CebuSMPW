@@ -8,8 +8,10 @@ import { Switch } from '../components/ui/switch';
 import { Textarea } from '../components/ui/textarea';
 import { MessageSquare, Send, CheckCircle2, Settings, Bell } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAppContext } from '../hooks/useAppContext';
 
 export default function Integrations() {
+  const { appName } = useAppContext();
   const [botToken, setBotToken] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [notificationRules, setNotificationRules] = useState({
@@ -123,7 +125,7 @@ export default function Integrations() {
                       <MessageSquare className="h-5 w-5 text-white" />
                     </div>
                     <div className="flex-1">
-                      <p className="font-medium text-neutral-900 text-sm">CartSmart Circuit Bot</p>
+                      <p className="font-medium text-neutral-900 text-sm">{appName} Bot</p>
                       <div className="mt-2 bg-white border border-neutral-200 rounded-lg p-3">
                         <p className="text-sm text-neutral-900 font-medium">
                           🗓️ You have been scheduled

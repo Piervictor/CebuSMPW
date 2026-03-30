@@ -24,6 +24,7 @@ import { useState } from 'react';
 import { useAppContext } from '../../hooks/useAppContext';
 import { GlobalSearch } from '../GlobalSearch';
 import { QuickActions } from '../QuickActions';
+import { APP_TAGLINE } from '../../../lib/branding';
 
 interface NavItem {
   name: string;
@@ -50,7 +51,6 @@ const navigation: NavItem[] = [
     ],
   },
   { name: 'My Schedule', href: '/my-schedule', icon: User, roles: ['member'] },
-  { name: 'Circuit Structure', href: '/circuit-structure', icon: Network, roles: ['circuit-admin'] },
   {
     name: 'Congregations',
     href: '/congregations',
@@ -103,6 +103,7 @@ const navigation: NavItem[] = [
     icon: Settings,
     roles: ['circuit-admin', 'congregation-admin'],
     children: [
+      { name: 'Branding', href: '/settings', icon: Settings },
       { name: 'Scheduling Policies', href: '/settings/scheduling-policies', icon: Calendar },
     ],
   },
@@ -121,7 +122,7 @@ export function MainLayout() {
     if (location.pathname.startsWith('/settings')) initial['Settings'] = true;
     return initial;
   });
-  const { currentUser } = useAppContext();
+  const { currentUser, appName } = useAppContext();
 
   if (!currentUser) {
     return null;
@@ -239,8 +240,8 @@ export function MainLayout() {
                   <Calendar className="h-4 w-4 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-base font-semibold text-white leading-tight">CartSmart Circuit</h1>
-                  <p className="text-[11px] text-slate-400 leading-tight">Public Witnessing Management</p>
+                  <h1 className="text-base font-semibold text-white leading-tight">{appName}</h1>
+                  <p className="text-[11px] text-slate-400 leading-tight">{APP_TAGLINE}</p>
                 </div>
               </div>
             </div>

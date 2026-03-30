@@ -4,13 +4,14 @@ import { Badge } from './ui/badge';
 import { useAppContext } from '../hooks/useAppContext';
 import type { UserRole } from '../data/mockData';
 import { Shield, Users, User } from 'lucide-react';
+import { APP_TAGLINE } from '../../lib/branding';
 
 interface RoleSwitcherProps {
   onRoleChange: () => void;
 }
 
 export function RoleSwitcher({ onRoleChange }: RoleSwitcherProps) {
-  const { setCurrentUser } = useAppContext();
+  const { appName, setCurrentUser } = useAppContext();
 
   const roles: Array<{ role: UserRole; label: string; description: string; icon: typeof Shield }> = [
     {
@@ -52,9 +53,9 @@ export function RoleSwitcher({ onRoleChange }: RoleSwitcherProps) {
     <div className="min-h-screen bg-neutral-50 flex items-center justify-center p-4">
       <Card className="max-w-4xl w-full">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">CartSmart Circuit</CardTitle>
+          <CardTitle className="text-2xl">{appName}</CardTitle>
           <CardDescription className="text-base mt-2">
-            Select a role to view the application from different perspectives
+            {APP_TAGLINE} for administrators and publishers
           </CardDescription>
         </CardHeader>
         <CardContent>
